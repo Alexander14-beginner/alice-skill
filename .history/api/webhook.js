@@ -22,17 +22,26 @@ async function askAI(history) {
 }
 
 async function findCity(rawName) {
-  const candidates = [rawName];
-  if (rawName.length > 4) {
-    candidates.push(rawName.slice(0, -1));
-    candidates.push(rawName.slice(0, -2));
-  }
+  const base1 = rawName.slice(0, -1);
+  const base2 = rawName.slice(0, -2);
+
+  const candidates = [
+    rawName,
+    base1 + 'а',
+    base1 + 'я',
+    base1,
+    base2 + 'а',
+    base2 + 'я',
+    base2
+  ];
 
   for (const candidate of candidates) {
+    if (!candidate || candidate.length < 3) continue;
     const geoRes = await fetch(
       `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(candidate)}&count=1&language=ru`
     );
     const geoData = await geoRes.json();
+    console.log('GEO TRY:', candidate, JSON.stringify(geoData.results ? geoData.results[0] : null));
     if (geoData.results && geoData.results.length) {
       return geoData.results[0];
     }
