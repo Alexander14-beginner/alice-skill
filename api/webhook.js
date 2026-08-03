@@ -10,19 +10,18 @@ const CITY_ALIASES = {
     'кзн': 'Казань', 'ростов': 'Ростов-на-Дону'
 };
 
-// ---------- описание инструментов для модели ----------
 const TOOLS = [
     {
         type: 'function',
         function: {
             name: 'get_weather',
-            description: 'Получить актуальную погоду в городе. Используй когда спрашивают про погоду, температуру, дождь, ветер.',
+            description: 'Актуальная погода в городе. Для вопросов про погоду, температуру, дождь, ветер.',
             parameters: {
                 type: 'object',
                 properties: {
                     city: {
                         type: 'string',
-                        description: 'Название города в именительном падеже, например "Москва", "Санкт-Петербург". Если город не указан — используй "Санкт-Петербург".'
+                        description: 'Город в именительном падеже, например "Москва". Если не указан — "Санкт-Петербург".'
                     }
                 },
                 required: ['city']
@@ -33,13 +32,13 @@ const TOOLS = [
         type: 'function',
         function: {
             name: 'get_time',
-            description: 'Узнать текущее время и дату в городе. Используй когда спрашивают который час, сколько времени, какое сегодня число.',
+            description: 'Текущее время и дата в городе.',
             parameters: {
                 type: 'object',
                 properties: {
                     city: {
                         type: 'string',
-                        description: 'Название города в именительном падеже. Если не указан — "Санкт-Петербург".'
+                        description: 'Город в именительном падеже. Если не указан — "Санкт-Петербург".'
                     }
                 },
                 required: ['city']
@@ -50,14 +49,11 @@ const TOOLS = [
         type: 'function',
         function: {
             name: 'web_search',
-            description: 'Найти актуальную информацию в интернете. Используй для новостей, курсов валют, цен, событий, свежих фактов — всего что могло измениться недавно или чего ты не знаешь.',
+            description: 'Поиск актуальной информации в интернете: новости, курсы, цены, свежие события.',
             parameters: {
                 type: 'object',
                 properties: {
-                    query: {
-                        type: 'string',
-                        description: 'Поисковый запрос, коротко и по делу'
-                    }
+                    query: { type: 'string', description: 'Короткий поисковый запрос' }
                 },
                 required: ['query']
             }
@@ -65,7 +61,6 @@ const TOOLS = [
     }
 ];
 
-// ---------- реализация инструментов ----------
 async function geoLookup(name) {
     try {
         const res = await fetch(
@@ -91,7 +86,7 @@ async function getWeather({ city }) {
 
     try {
         const res = await fetch(
-            `https://api.open-meteo.com/v1/forecast?latitude=${loc.latitude}&longitude=${loc.longitude}&current=temperature_2m,apparent_temperature,wind_speed_10m,relative_humidity_2m&daily=temperature_2m_max,temperature_2m_min&timezone=auto&forecast_days=1`
+            `https://api.open-meteo.com/v1/forecast?latitude=${loc.latitude}&longitude=${loc.longitude}&current=temperature_2m,apparent_temperature,wind_speed_10m&daily=temperature_2m_max,temperature_2m_min&timezone=auto&forecast_days=1`
         );
         const d = await res.json();
         return {
@@ -99,7 +94,6 @@ async function getWeather({ city }) {
             temp: d.current.temperature_2m,
             feels_like: d.current.apparent_temperature,
             wind: d.current.wind_speed_10m,
-            humidity: d.current.relative_humidity_2m,
             max_today: d.daily.temperature_2m_max[0],
             min_today: d.daily.temperature_2m_min[0]
         };
@@ -133,14 +127,14 @@ async function webSearch({ query }) {
             body: JSON.stringify({
                 api_key: TAVILY_KEY,
                 query,
-                max_results: 3,
+                max_results: 2,
                 search_depth: 'basic'
             })
         });
         const data = await res.json();
         if (!data.results || !data.results.length) return { error: 'Ничего не найдено' };
         return {
-            results: data.results.map((r) => ({ title: r.title, content: r.content }))
+            results: data.results.map((r) => ({ title: r.title, content: r.content.slice(0, 400) }))
         };
     } catch (e) {
         console.error('SEARCH ERROR:', e.message);
@@ -154,7 +148,6 @@ const TOOL_IMPL = {
     web_search: webSearch
 };
 
-// ---------- вызов модели с поддержкой инструментов ----------
 async function callModel(messages) {
     const res = await fetch('https://api.aitunnel.ru/v1/chat/completions', {
         method: 'POST',
@@ -164,21 +157,20 @@ async function callModel(messages) {
         },
         body: JSON.stringify({
             model: 'openai/gpt-5.6-luna',
-            max_tokens: 400,
+            max_tokens: 250,
             messages,
             tools: TOOLS
         })
     });
     const data = await res.json();
-    console.log('MODEL RESPONSE:', JSON.stringify(data).slice(0, 800));
+    console.log('MODEL RESPONSE:', JSON.stringify(data).slice(0, 500));
     return data.choices[0].message;
 }
 
 async function askAI(history) {
     let messages = [...history];
 
-    // до 3 раундов вызова инструментов
-    for (let round = 0; round < 3; round++) {
+    for (let round = 0; round < 2; round++) {
         const msg = await callModel(messages);
         messages.push(msg);
 
@@ -186,30 +178,35 @@ async function askAI(history) {
             return { answer: msg.content, messages };
         }
 
-        for (const call of msg.tool_calls) {
-            const fn = TOOL_IMPL[call.function.name];
-            let result;
-            try {
-                const args = JSON.parse(call.function.arguments || '{}');
-                console.log('TOOL CALL:', call.function.name, JSON.stringify(args));
-                result = fn ? await fn(args) : { error: 'Неизвестный инструмент' };
-            } catch (e) {
-                console.error('TOOL ERROR:', e.message);
-                result = { error: 'Ошибка выполнения' };
-            }
+        // все инструменты вызываем параллельно
+        const results = await Promise.all(
+            msg.tool_calls.map(async (call) => {
+                const fn = TOOL_IMPL[call.function.name];
+                try {
+                    const args = JSON.parse(call.function.arguments || '{}');
+                    console.log('TOOL CALL:', call.function.name, JSON.stringify(args));
+                    const result = fn ? await fn(args) : { error: 'Неизвестный инструмент' };
+                    return { id: call.id, result };
+                } catch (e) {
+                    console.error('TOOL ERROR:', e.message);
+                    return { id: call.id, result: { error: 'Ошибка выполнения' } };
+                }
+            })
+        );
 
+        for (const r of results) {
             messages.push({
                 role: 'tool',
-                tool_call_id: call.id,
-                content: JSON.stringify(result)
+                tool_call_id: r.id,
+                content: JSON.stringify(r.result)
             });
         }
     }
 
-    return { answer: 'Не смог разобраться, попробуй переформулировать.', messages };
+    const final = await callModel(messages);
+    return { answer: final.content || 'Не смог разобраться.', messages };
 }
 
-// ---------- обработчик Алисы ----------
 module.exports = async function handler(req, res) {
     if (req.method !== 'POST') {
         return res.status(405).send('Method not allowed');
@@ -225,13 +222,21 @@ module.exports = async function handler(req, res) {
             {
                 role: 'system',
                 content:
-                    'Ты голосовой помощник в умной колонке. Отвечай кратко (до 200 символов), разговорным стилем, без мата и без 18+ тем. У тебя есть инструменты для погоды, времени и поиска в интернете — используй их когда нужны актуальные данные. Никогда не говори что у тебя нет доступа к информации: если данные нужны — вызови инструмент.'
+                    'Ты голосовой помощник в умной колонке. Отвечай ОЧЕНЬ кратко — 1-2 предложения, до 200 символов. Разговорный стиль, без мата и 18+ тем. Есть инструменты для погоды, времени и поиска — вызывай их когда нужны актуальные данные. Никогда не говори что у тебя нет доступа к информации.'
             }
         ];
     }
 
     if (isNew) {
         return res.status(200).json(respond('Привет! Спроси меня что-нибудь.', body));
+    }
+
+    // не даём истории разрастаться — держим системный промпт + последние 10 сообщений
+    if (sessions[sessionId].length > 11) {
+        sessions[sessionId] = [
+            sessions[sessionId][0],
+            ...sessions[sessionId].slice(-10)
+        ];
     }
 
     sessions[sessionId].push({ role: 'user', content: userText });
@@ -246,7 +251,6 @@ module.exports = async function handler(req, res) {
         answer = 'Извини, что-то пошло не так, попробуй ещё раз.';
     }
 
-    // Алиса не принимает ответы длиннее 1024 символов
     if (answer.length > 1000) answer = answer.slice(0, 1000);
 
     return res.status(200).json(respond(answer, body));
