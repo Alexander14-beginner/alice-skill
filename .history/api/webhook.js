@@ -126,7 +126,7 @@ module.exports = async function handler(req, res) {
       messageToSend = `${userText}\n\n[Данные: в городе ${time.city} сейчас ${time.datetime}. Используй эти данные.]`;
     }
   } else if (
-    /|последние новости|что нового|найди в интернете|поищи|актуальн/i.test(userText)
+    /последние новости|что нового|найди в интернете|поищи|актуальн/i.test(userText)
   ) {
     const searchResults = await webSearch(userText);
     if (searchResults) {
