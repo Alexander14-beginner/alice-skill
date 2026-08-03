@@ -11,9 +11,9 @@ const CITY_ALIASES = {
 };
 
 const SYSTEM_PROMPT =
-    'Ты голосовой помощник в умной колонке. Отвечай ОЧЕНЬ кратко — 1-2 предложения, до 200 символов. Разговорный стиль, без мата и 18+ тем. У тебя есть инструменты для погоды и времени — вызывай их когда нужны актуальные данные.';
+    'Ты голосовой помощник в умной колонке. Отвечай ОЧЕНЬ кратко — 1-2 предложения, до 200 символов. Разговорный стиль, без мата и 18+ тем. У тебя есть инструменты: погода, время и поиск в интернете (need_search). Никогда не говори что у тебя нет доступа к данным — для любой актуальной информации (курсы, цены, новости, события, факты) вызывай need_search.';
 
-const TOOLS = [
+const LOCAL_TOOLS = [
     {
         functionDeclarations: [
             {
@@ -43,10 +43,26 @@ const TOOLS = [
                     },
                     required: ['city']
                 }
+            },
+            {
+                name: 'need_search',
+                description: 'Вызови когда для ответа нужна актуальная информация из интернета: новости, курсы валют, цены, акции, спортивные результаты, свежие события, факты которые могли измениться.',
+                parameters: {
+                    type: 'OBJECT',
+                    properties: {
+                        query: {
+                            type: 'STRING',
+                            description: 'Короткий поисковый запрос для Google'
+                        }
+                    },
+                    required: ['query']
+                }
             }
         ]
     }
 ];
+
+const SEARCH_TOOLS = [{ googleSearch: {} }];
 
 async function geoLookup(name) {
     try {
@@ -111,52 +127,74 @@ const TOOL_IMPL = {
     get_time: getTime
 };
 
-async function callGemini(contents) {
+// вызов Gemini с указанным набором инструментов
+async function callGemini(contents, tools, systemText) {
+    const body = {
+        contents,
+        generationConfig: {
+            maxOutputTokens: 250,
+            temperature: 0.7
+        }
+    };
+    if (tools) body.tools = tools;
+    if (systemText) body.systemInstruction = { parts: [{ text: systemText }] };
+
     const res = await fetch(
         `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${GEMINI_KEY}`,
         {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                contents,
-                tools: TOOLS,
-                systemInstruction: {
-                    parts: [{ text: SYSTEM_PROMPT }]
-                },
-                generationConfig: {
-                    maxOutputTokens: 250,
-                    temperature: 0.7
-                }
-            })
+            body: JSON.stringify(body)
         }
     );
     const data = await res.json();
-    console.log('GEMINI RESPONSE:', JSON.stringify(data).slice(0, 800));
+    console.log('GEMINI RESPONSE:', JSON.stringify(data).slice(0, 600));
 
-    if (data.error) {
-        throw new Error('API error: ' + JSON.stringify(data.error).slice(0, 200));
-    }
+    if (data.error) throw new Error('API error: ' + JSON.stringify(data.error).slice(0, 200));
     if (!data.candidates || !data.candidates.length) {
         throw new Error('Нет candidates: ' + JSON.stringify(data).slice(0, 200));
     }
     return data.candidates[0].content;
 }
 
+// отдельный запрос с Google-поиском
+async function searchWithGoogle(query) {
+    const content = await callGemini(
+        [{ role: 'user', parts: [{ text: query }] }],
+        SEARCH_TOOLS,
+        'Отвечай кратко — 1-2 предложения, до 200 символов, разговорным стилем. Используй результаты поиска.'
+    );
+    return (content.parts || []).map((p) => p.text || '').join(' ').trim();
+}
+
+function textFrom(content) {
+    return (content.parts || []).map((p) => p.text || '').join(' ').trim();
+}
+
 async function askAI(contents) {
     let history = [...contents];
 
     for (let round = 0; round < 2; round++) {
-        const content = await callGemini(history);
+        const content = await callGemini(history, LOCAL_TOOLS, SYSTEM_PROMPT);
         history.push(content);
 
         const calls = (content.parts || []).filter((p) => p.functionCall);
 
         if (!calls.length) {
-            const text = (content.parts || [])
-                .map((p) => p.text || '')
-                .join(' ')
-                .trim();
-            return { answer: text, history };
+            return { answer: textFrom(content), history };
+        }
+
+        // если модель просит поиск — уходим в отдельный запрос с googleSearch
+        const searchCall = calls.find((c) => c.functionCall.name === 'need_search');
+        if (searchCall) {
+            const query = (searchCall.functionCall.args || {}).query || '';
+            console.log('SEARCH:', query);
+            const answer = await searchWithGoogle(query);
+            history.push({
+                role: 'user',
+                parts: [{ functionResponse: { name: 'need_search', response: { answer } } }]
+            });
+            return { answer: answer || 'Ничего не нашёл.', history };
         }
 
         const responses = await Promise.all(
@@ -178,9 +216,8 @@ async function askAI(contents) {
         history.push({ role: 'user', parts: responses });
     }
 
-    const final = await callGemini(history);
-    const text = (final.parts || []).map((p) => p.text || '').join(' ').trim();
-    return { answer: text || 'Не смог разобраться.', history };
+    const final = await callGemini(history, LOCAL_TOOLS, SYSTEM_PROMPT);
+    return { answer: textFrom(final) || 'Не смог разобраться.', history };
 }
 
 module.exports = async function handler(req, res) {
