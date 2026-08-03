@@ -11,9 +11,8 @@ const CITY_ALIASES = {
 };
 
 const SYSTEM_PROMPT =
-    'Ты голосовой помощник в умной колонке. Отвечай ОЧЕНЬ кратко — 1-2 предложения, до 200 символов. Разговорный стиль, без мата и 18+ тем. У тебя есть инструменты для погоды и времени, а также поиск Google для актуальной информации. Никогда не говори, что у тебя нет доступа к данным — вызывай инструменты или ищи.';
+    'Ты голосовой помощник в умной колонке. Отвечай ОЧЕНЬ кратко — 1-2 предложения, до 200 символов. Разговорный стиль, без мата и 18+ тем. У тебя есть инструменты для погоды и времени — вызывай их когда нужны актуальные данные.';
 
-// ---------- инструменты ----------
 const TOOLS = [
     {
         functionDeclarations: [
@@ -46,8 +45,7 @@ const TOOLS = [
                 }
             }
         ]
-    },
-    { googleSearch: {} }
+    }
 ];
 
 async function geoLookup(name) {
@@ -113,7 +111,6 @@ const TOOL_IMPL = {
     get_time: getTime
 };
 
-// ---------- вызов Gemini ----------
 async function callGemini(contents) {
     const res = await fetch(
         `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${GEMINI_KEY}`,
@@ -134,10 +131,13 @@ async function callGemini(contents) {
         }
     );
     const data = await res.json();
-    console.log('GEMINI RESPONSE:', JSON.stringify(data).slice(0, 600));
+    console.log('GEMINI RESPONSE:', JSON.stringify(data).slice(0, 800));
 
+    if (data.error) {
+        throw new Error('API error: ' + JSON.stringify(data.error).slice(0, 200));
+    }
     if (!data.candidates || !data.candidates.length) {
-        throw new Error('Пустой ответ от модели');
+        throw new Error('Нет candidates: ' + JSON.stringify(data).slice(0, 200));
     }
     return data.candidates[0].content;
 }
@@ -183,7 +183,6 @@ async function askAI(contents) {
     return { answer: text || 'Не смог разобраться.', history };
 }
 
-// ---------- обработчик Алисы ----------
 module.exports = async function handler(req, res) {
     if (req.method !== 'POST') {
         return res.status(405).send('Method not allowed');
@@ -202,7 +201,6 @@ module.exports = async function handler(req, res) {
         return res.status(200).json(respond('Привет! Спроси меня что-нибудь.', body));
     }
 
-    // держим только последние 10 сообщений
     if (sessions[sessionId].length > 10) {
         sessions[sessionId] = sessions[sessionId].slice(-10);
     }
