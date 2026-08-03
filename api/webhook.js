@@ -3,199 +3,129 @@ const sessions = {};
 const AITUNNEL_KEY = process.env.AITUNNEL_KEY;
 const TAVILY_KEY = process.env.TAVILY_KEY;
 
-// словарь сокращений и разговорных названий
 const CITY_ALIASES = {
-    'мск': 'Москва',
-    'москва': 'Москва',
-    'спб': 'Санкт-Петербург',
-    'питер': 'Санкт-Петербург',
-    'петербург': 'Санкт-Петербург',
-    'нск': 'Новосибирск',
-    'екб': 'Екатеринбург',
-    'нн': 'Нижний Новгород',
-    'кзн': 'Казань',
-    'ростов': 'Ростов-на-Дону',
-    'сочи': 'Сочи',
-    'тюмень': 'Тюмень',
-    'краснодар': 'Краснодар',
-    'самара': 'Самара',
-    'уфа': 'Уфа',
-    'пермь': 'Пермь',
-    'омск': 'Омск',
-    'челябинск': 'Челябинск',
-    'волгоград': 'Волгоград',
-    'воронеж': 'Воронеж',
-    'владивосток': 'Владивосток',
-    'калининград': 'Калининград',
-    'минск': 'Минск',
-    'киев': 'Киев',
-    'алматы': 'Алматы',
-    'астана': 'Астана',
-    'ташкент': 'Ташкент',
-    'тбилиси': 'Тбилиси',
-    'ереван': 'Ереван',
-    'баку': 'Баку',
-    'дубай': 'Дубай',
-    'нью-йорк': 'Нью-Йорк',
-    'лондон': 'Лондон',
-    'париж': 'Париж',
-    'берлин': 'Берлин',
-    'токио': 'Токио',
-    'пекин': 'Пекин'
+    'мск': 'Москва', 'москва': 'Москва',
+    'спб': 'Санкт-Петербург', 'питер': 'Санкт-Петербург', 'петербург': 'Санкт-Петербург',
+    'нск': 'Новосибирск', 'екб': 'Екатеринбург', 'нн': 'Нижний Новгород',
+    'кзн': 'Казань', 'ростов': 'Ростов-на-Дону'
 };
 
-const DEFAULT_CITY = 'Санкт-Петербург';
-
-// служебные слова, которые точно не город
-const STOP_WORDS = new Set([
-    'какая', 'какой', 'сейчас', 'сегодня', 'завтра', 'вчера', 'погода', 'погоду',
-    'погоде', 'время', 'часов', 'час', 'который', 'сколько', 'там', 'тут', 'здесь',
-    'это', 'мне', 'меня', 'тебе', 'нас', 'вас', 'them', 'днем', 'днём', 'ночью',
-    'утром', 'вечером', 'будет', 'было', 'температура', 'градусов', 'интернете',
-    'сети', 'новости', 'новостях'
-]);
-
-async function askAI(history) {
-    const res = await fetch('https://api.aitunnel.ru/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${AITUNNEL_KEY}`
-        },
-        body: JSON.stringify({
-            model: 'openai/gpt-5.6-luna',
-            max_tokens: 300,
-            messages: history
-        })
-    });
-    const data = await res.json();
-    console.log('AITUNNEL RESPONSE:', JSON.stringify(data));
-    return data.choices[0].message.content;
-}
-
-async function findCity(rawName) {
-    const lower = rawName.toLowerCase().trim();
-
-    // сначала проверяем словарь
-    if (CITY_ALIASES[lower]) {
-        return await geoLookup(CITY_ALIASES[lower]);
+// ---------- описание инструментов для модели ----------
+const TOOLS = [
+    {
+        type: 'function',
+        function: {
+            name: 'get_weather',
+            description: 'Получить актуальную погоду в городе. Используй когда спрашивают про погоду, температуру, дождь, ветер.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    city: {
+                        type: 'string',
+                        description: 'Название города в именительном падеже, например "Москва", "Санкт-Петербург". Если город не указан — используй "Санкт-Петербург".'
+                    }
+                },
+                required: ['city']
+            }
+        }
+    },
+    {
+        type: 'function',
+        function: {
+            name: 'get_time',
+            description: 'Узнать текущее время и дату в городе. Используй когда спрашивают который час, сколько времени, какое сегодня число.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    city: {
+                        type: 'string',
+                        description: 'Название города в именительном падеже. Если не указан — "Санкт-Петербург".'
+                    }
+                },
+                required: ['city']
+            }
+        }
+    },
+    {
+        type: 'function',
+        function: {
+            name: 'web_search',
+            description: 'Найти актуальную информацию в интернете. Используй для новостей, курсов валют, цен, событий, свежих фактов — всего что могло измениться недавно или чего ты не знаешь.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    query: {
+                        type: 'string',
+                        description: 'Поисковый запрос, коротко и по делу'
+                    }
+                },
+                required: ['query']
+            }
+        }
     }
+];
 
-    // потом пробуем варианты с падежами
-    const base1 = rawName.slice(0, -1);
-    const base2 = rawName.slice(0, -2);
-
-    const candidates = [
-        rawName,
-        base1 + 'а',
-        base1 + 'я',
-        base1,
-        base2 + 'а',
-        base2 + 'я',
-        base2 + 'ь',
-        base2
-    ];
-
-    for (const candidate of candidates) {
-        if (!candidate || candidate.length < 3) continue;
-        const result = await geoLookup(candidate);
-        if (result) return result;
-    }
-    return null;
-}
-
+// ---------- реализация инструментов ----------
 async function geoLookup(name) {
     try {
-        const geoRes = await fetch(
+        const res = await fetch(
             `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(name)}&count=1&language=ru`
         );
-        const geoData = await geoRes.json();
-        console.log('GEO TRY:', name, geoData.results ? 'FOUND' : 'not found');
-        if (geoData.results && geoData.results.length) {
-            return geoData.results[0];
-        }
+        const data = await res.json();
+        if (data.results && data.results.length) return data.results[0];
     } catch (e) {
         console.error('GEO ERROR:', e.message);
     }
     return null;
 }
 
-function extractCity(text) {
-    const cleaned = text.toLowerCase().replace(/[.,!?;:]/g, '');
-    const words = cleaned.split(/\s+/);
-
-    // 1. ищем прямое совпадение со словарём в любом месте фразы
-    for (const word of words) {
-        if (CITY_ALIASES[word]) return CITY_ALIASES[word];
-    }
-
-    // 2. ищем конструкцию "в [город]"
-    const prepMatch = cleaned.match(/\bв\s+([а-яё][а-яё\-]{2,})/);
-    if (prepMatch && !STOP_WORDS.has(prepMatch[1])) {
-        return prepMatch[1];
-    }
-
-    // 3. берём последнее "значимое" слово (не служебное, не короткое)
-    for (let i = words.length - 1; i >= 0; i--) {
-        const w = words[i];
-        if (w.length >= 3 && !STOP_WORDS.has(w) && /^[а-яё\-]+$/.test(w)) {
-            return w;
-        }
-    }
-
-    return DEFAULT_CITY;
+async function findCity(rawName) {
+    const lower = (rawName || '').toLowerCase().trim();
+    const resolved = CITY_ALIASES[lower] || rawName;
+    return await geoLookup(resolved);
 }
 
-async function getWeather(city) {
+async function getWeather({ city }) {
+    const loc = await findCity(city);
+    if (!loc) return { error: 'Город не найден' };
+
     try {
-        const location = await findCity(city);
-        if (!location) return null;
-
-        const { latitude, longitude, name, timezone } = location;
-
-        const weatherRes = await fetch(
-            `https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current=temperature_2m,apparent_temperature,weather_code,wind_speed_10m,relative_humidity_2m&daily=temperature_2m_max,temperature_2m_min&timezone=auto&forecast_days=1`
+        const res = await fetch(
+            `https://api.open-meteo.com/v1/forecast?latitude=${loc.latitude}&longitude=${loc.longitude}&current=temperature_2m,apparent_temperature,wind_speed_10m,relative_humidity_2m&daily=temperature_2m_max,temperature_2m_min&timezone=auto&forecast_days=1`
         );
-        const weatherData = await weatherRes.json();
-
+        const d = await res.json();
         return {
-            city: name,
-            temp: weatherData.current.temperature_2m,
-            feels: weatherData.current.apparent_temperature,
-            wind: weatherData.current.wind_speed_10m,
-            humidity: weatherData.current.relative_humidity_2m,
-            max: weatherData.daily ? weatherData.daily.temperature_2m_max[0] : null,
-            min: weatherData.daily ? weatherData.daily.temperature_2m_min[0] : null,
-            timezone
+            city: loc.name,
+            temp: d.current.temperature_2m,
+            feels_like: d.current.apparent_temperature,
+            wind: d.current.wind_speed_10m,
+            humidity: d.current.relative_humidity_2m,
+            max_today: d.daily.temperature_2m_max[0],
+            min_today: d.daily.temperature_2m_min[0]
         };
     } catch (e) {
         console.error('WEATHER ERROR:', e.message);
-        return null;
+        return { error: 'Не удалось получить погоду' };
     }
 }
 
-async function getTime(city) {
-    try {
-        const location = await findCity(city);
-        if (!location || !location.timezone) return null;
+async function getTime({ city }) {
+    const loc = await findCity(city);
+    if (!loc || !loc.timezone) return { error: 'Город не найден' };
 
-        const now = new Date().toLocaleString('ru-RU', {
-            timeZone: location.timezone,
-            hour: '2-digit',
-            minute: '2-digit',
-            weekday: 'long',
-            day: 'numeric',
-            month: 'long'
-        });
+    const now = new Date().toLocaleString('ru-RU', {
+        timeZone: loc.timezone,
+        hour: '2-digit',
+        minute: '2-digit',
+        weekday: 'long',
+        day: 'numeric',
+        month: 'long'
+    });
 
-        return { city: location.name, datetime: now };
-    } catch (e) {
-        console.error('TIME ERROR:', e.message);
-        return null;
-    }
+    return { city: loc.name, current_time: now };
 }
 
-async function webSearch(query) {
+async function webSearch({ query }) {
     try {
         const res = await fetch('https://api.tavily.com/search', {
             method: 'POST',
@@ -208,15 +138,78 @@ async function webSearch(query) {
             })
         });
         const data = await res.json();
-        console.log('SEARCH RESULT COUNT:', data.results ? data.results.length : 0);
-        if (!data.results || !data.results.length) return null;
-        return data.results.map((r) => `${r.title}: ${r.content}`).join('\n');
+        if (!data.results || !data.results.length) return { error: 'Ничего не найдено' };
+        return {
+            results: data.results.map((r) => ({ title: r.title, content: r.content }))
+        };
     } catch (e) {
         console.error('SEARCH ERROR:', e.message);
-        return null;
+        return { error: 'Поиск недоступен' };
     }
 }
 
+const TOOL_IMPL = {
+    get_weather: getWeather,
+    get_time: getTime,
+    web_search: webSearch
+};
+
+// ---------- вызов модели с поддержкой инструментов ----------
+async function callModel(messages) {
+    const res = await fetch('https://api.aitunnel.ru/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${AITUNNEL_KEY}`
+        },
+        body: JSON.stringify({
+            model: 'openai/gpt-5.6-luna',
+            max_tokens: 400,
+            messages,
+            tools: TOOLS
+        })
+    });
+    const data = await res.json();
+    console.log('MODEL RESPONSE:', JSON.stringify(data).slice(0, 800));
+    return data.choices[0].message;
+}
+
+async function askAI(history) {
+    let messages = [...history];
+
+    // до 3 раундов вызова инструментов
+    for (let round = 0; round < 3; round++) {
+        const msg = await callModel(messages);
+        messages.push(msg);
+
+        if (!msg.tool_calls || !msg.tool_calls.length) {
+            return { answer: msg.content, messages };
+        }
+
+        for (const call of msg.tool_calls) {
+            const fn = TOOL_IMPL[call.function.name];
+            let result;
+            try {
+                const args = JSON.parse(call.function.arguments || '{}');
+                console.log('TOOL CALL:', call.function.name, JSON.stringify(args));
+                result = fn ? await fn(args) : { error: 'Неизвестный инструмент' };
+            } catch (e) {
+                console.error('TOOL ERROR:', e.message);
+                result = { error: 'Ошибка выполнения' };
+            }
+
+            messages.push({
+                role: 'tool',
+                tool_call_id: call.id,
+                content: JSON.stringify(result)
+            });
+        }
+    }
+
+    return { answer: 'Не смог разобраться, попробуй переформулировать.', messages };
+}
+
+// ---------- обработчик Алисы ----------
 module.exports = async function handler(req, res) {
     if (req.method !== 'POST') {
         return res.status(405).send('Method not allowed');
@@ -232,7 +225,7 @@ module.exports = async function handler(req, res) {
             {
                 role: 'system',
                 content:
-                    'Ты голосовой помощник. Отвечай кратко (до 200 символов), разговорным стилем, без мата и без обсуждения 18+ тем. Если тебе передали актуальные данные — используй именно их и никогда не говори, что у тебя нет доступа к информации.'
+                    'Ты голосовой помощник в умной колонке. Отвечай кратко (до 200 символов), разговорным стилем, без мата и без 18+ тем. У тебя есть инструменты для погоды, времени и поиска в интернете — используй их когда нужны актуальные данные. Никогда не говори что у тебя нет доступа к информации: если данные нужны — вызови инструмент.'
             }
         ];
     }
@@ -241,53 +234,20 @@ module.exports = async function handler(req, res) {
         return res.status(200).json(respond('Привет! Спроси меня что-нибудь.', body));
     }
 
-    let messageToSend = userText;
-
-    const isWeather = /погод|температур|градус|дожд|снег|ветер|солнечно|облачно|тепло ли|холодно ли/i.test(userText);
-    const isTime = /который час|сколько времени|время сейчас|какое время|сколько сейчас времени|какой сегодня день|какое сегодня число/i.test(userText);
-    const isSearch = /новост|что нового|найди|поищи|погугли|актуальн|курс|стоимость|цена|кто такой|что такое|когда вышл|последн/i.test(userText);
-
-    if (isWeather) {
-        const city = extractCity(userText);
-        const weather = await getWeather(city);
-        if (weather) {
-            messageToSend = `Вопрос пользователя: "${userText}"
-
-АКТУАЛЬНЫЕ ДАННЫЕ О ПОГОДЕ (используй именно их):
-Город: ${weather.city}
-Сейчас: ${weather.temp}°C (ощущается как ${weather.feels}°C)
-Ветер: ${weather.wind} м/с, влажность ${weather.humidity}%
-Днём максимум: ${weather.max}°C, минимум: ${weather.min}°C`;
-        }
-    } else if (isTime) {
-        const city = extractCity(userText);
-        const time = await getTime(city);
-        if (time) {
-            messageToSend = `Вопрос пользователя: "${userText}"
-
-АКТУАЛЬНОЕ ВРЕМЯ (используй именно его): в городе ${time.city} сейчас ${time.datetime}.`;
-        }
-    } else if (isSearch) {
-        const searchResults = await webSearch(userText);
-        if (searchResults) {
-            messageToSend = `Вопрос пользователя: "${userText}"
-
-РЕЗУЛЬТАТЫ ПОИСКА В ИНТЕРНЕТЕ (используй их для ответа):
-${searchResults}`;
-        }
-    }
-
-    sessions[sessionId].push({ role: 'user', content: messageToSend });
+    sessions[sessionId].push({ role: 'user', content: userText });
 
     let answer;
     try {
-        answer = await askAI(sessions[sessionId]);
+        const result = await askAI(sessions[sessionId]);
+        answer = result.answer || 'Не понял вопрос, попробуй ещё раз.';
+        sessions[sessionId] = result.messages;
     } catch (e) {
         console.error('AI ERROR:', e.message);
         answer = 'Извини, что-то пошло не так, попробуй ещё раз.';
     }
 
-    sessions[sessionId].push({ role: 'assistant', content: answer });
+    // Алиса не принимает ответы длиннее 1024 символов
+    if (answer.length > 1000) answer = answer.slice(0, 1000);
 
     return res.status(200).json(respond(answer, body));
 };
