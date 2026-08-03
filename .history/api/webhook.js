@@ -16,7 +16,8 @@ async function askAI(history) {
         })
     });
     const data = await res.json();
-    return data.choices[0].message.content;
+  console.log('AITUNNEL RESPONSE:', JSON.stringify(data));
+  return data.choices[0].message.content;
 }
 
 module.exports = async function handler(req, res) {
@@ -45,7 +46,8 @@ module.exports = async function handler(req, res) {
     try {
         answer = await askAI(sessions[sessionId]);
     } catch (e) {
-        answer = 'Извини, что-то пошло не так, попробуй ещё раз.';
+    console.error('AI ERROR:', e.message);
+    answer = 'Извини, что-то пошло не так, попробуй ещё раз.';
     }
 
     sessions[sessionId].push({ role: 'assistant', content: answer });
