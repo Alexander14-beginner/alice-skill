@@ -21,15 +21,31 @@ async function askAI(history) {
   return data.choices[0].message.content;
 }
 
-async function getWeather(city) {
-  try {
+async function findCity(rawName) {
+  const candidates = [rawName];
+  if (rawName.length > 4) {
+    candidates.push(rawName.slice(0, -1));
+    candidates.push(rawName.slice(0, -2));
+  }
+
+  for (const candidate of candidates) {
     const geoRes = await fetch(
-      `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(city)}&count=1&language=ru`
+      `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(candidate)}&count=1&language=ru`
     );
     const geoData = await geoRes.json();
-    if (!geoData.results || !geoData.results.length) return null;
+    if (geoData.results && geoData.results.length) {
+      return geoData.results[0];
+    }
+  }
+  return null;
+}
 
-    const { latitude, longitude, name, timezone } = geoData.results[0];
+async function getWeather(city) {
+  try {
+    const location = await findCity(city);
+    if (!location) return null;
+
+    const { latitude, longitude, name, timezone } = location;
 
     const weatherRes = await fetch(
       `https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current=temperature_2m,weather_code,wind_speed_10m`
@@ -117,20 +133,20 @@ module.exports = async function handler(req, res) {
     const city = extractCity(userText);
     const weather = await getWeather(city);
     if (weather) {
-      messageToSend = `${userText}\n\n[Данные: в городе ${weather.city} сейчас ${weather.temp}°C, ветер ${weather.wind} м/с. Используй эти данные.]`;
+      messageToSend = `Вопрос пользователя: "${userText}"\n\nАКТУАЛЬНЫЕ ДАННЫЕ О ПОГОДЕ (используй именно их, не говори что у тебя нет доступа к погоде): город ${weather.city}, температура ${weather.temp}°C, ветер ${weather.wind} м/с.`;
     }
   } else if (/который час|сколько времени|время сейчас/i.test(userText)) {
     const city = extractCity(userText);
     const time = await getTime(city);
     if (time) {
-      messageToSend = `${userText}\n\n[Данные: в городе ${time.city} сейчас ${time.datetime}. Используй эти данные.]`;
+      messageToSend = `Вопрос пользователя: "${userText}"\n\nАКТУАЛЬНЫЕ ДАННЫЕ О ВРЕМЕНИ (используй именно их): в городе ${time.city} сейчас ${time.datetime}.`;
     }
   } else if (
     /последние новости|что нового|найди в интернете|поищи|актуальн/i.test(userText)
   ) {
     const searchResults = await webSearch(userText);
     if (searchResults) {
-      messageToSend = `${userText}\n\n[Результаты поиска в интернете:\n${searchResults}\n\nИспользуй эту информацию для ответа.]`;
+      messageToSend = `Вопрос пользователя: "${userText}"\n\nРЕЗУЛЬТАТЫ ПОИСКА В ИНТЕРНЕТЕ (используй их для ответа):\n${searchResults}`;
     }
   }
 
