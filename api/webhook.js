@@ -8,24 +8,27 @@ const CITY_ALIASES = {
     'мск': 'Москва', 'москва': 'Москва',
     'спб': 'Санкт-Петербург', 'питер': 'Санкт-Петербург', 'петербург': 'Санкт-Петербург',
     'нск': 'Новосибирск', 'екб': 'Екатеринбург', 'нн': 'Нижний Новгород',
-    'кзн': 'Казань', 'ростов': 'Ростов-на-Дону'
+    'кзн': 'Казань', 'ростов': 'Ростов-на-Дону', 'влад': 'Владивосток'
 };
 
 const SYSTEM_PROMPT =
-    'Ты голосовой помощник в умной колонке. Отвечай ОЧЕНЬ кратко — 1-2 предложения, до 200 символов. Разговорный стиль, без мата и 18+ тем. У тебя есть инструменты: погода, время и поиск в интернете. Никогда не говори что у тебя нет доступа к данным — для любой актуальной информации (курсы, цены, новости, события, спорт, факты) вызывай web_search.';
+    'Ты голосовой помощник в умной колонке. Отвечай кратко — 1-3 предложения, разговорным стилем, без мата и 18+ тем. ' +
+    'ВАЖНО: никогда не называй цифры (курсы, цены, статистику) по памяти — только из результатов инструментов. ' +
+    'Для курсов валют и криптовалют вызывай get_rate. Для новостей, цен, событий и любых свежих фактов вызывай web_search. ' +
+    'Если инструмент вернул ошибку — честно скажи, что не смог узнать, но не выдумывай данные.';
 
 const TOOLS = [
     {
         functionDeclarations: [
             {
                 name: 'get_weather',
-                description: 'Актуальная погода в городе: температура, ветер, макс/мин за день.',
+                description: 'Актуальная погода в городе.',
                 parameters: {
                     type: 'OBJECT',
                     properties: {
                         city: {
                             type: 'STRING',
-                            description: 'Город в именительном падеже, например "Москва", "Припять". Всегда приводи название к именительному падежу.'
+                            description: 'Город в именительном падеже, например "Москва". Всегда приводи к именительному падежу.'
                         }
                     },
                     required: ['city']
@@ -46,14 +49,28 @@ const TOOLS = [
                 }
             },
             {
+                name: 'get_rate',
+                description: 'Точный курс валюты или криптовалюты. Используй ВСЕГДА для вопросов про доллар, евро, биткоин и любые курсы.',
+                parameters: {
+                    type: 'OBJECT',
+                    properties: {
+                        code: {
+                            type: 'STRING',
+                            description: 'Код валюты: USD, EUR, CNY, BTC, ETH и т.д.'
+                        }
+                    },
+                    required: ['code']
+                }
+            },
+            {
                 name: 'web_search',
-                description: 'Поиск актуальной информации в интернете: новости, курсы валют, цены, акции, капитализация компаний, спортивные результаты, свежие события.',
+                description: 'Поиск в интернете: новости, события, цены товаров, факты о компаниях, спорт, всё что могло измениться.',
                 parameters: {
                     type: 'OBJECT',
                     properties: {
                         query: {
                             type: 'STRING',
-                            description: 'Короткий поисковый запрос'
+                            description: 'Конкретный поисковый запрос. Формулируй точно, не общими словами.'
                         }
                     },
                     required: ['query']
@@ -88,7 +105,7 @@ async function getWeather({ city }) {
 
     try {
         const res = await fetch(
-            `https://api.open-meteo.com/v1/forecast?latitude=${loc.latitude}&longitude=${loc.longitude}&current=temperature_2m,apparent_temperature,wind_speed_10m&daily=temperature_2m_max,temperature_2m_min&timezone=auto&forecast_days=1`
+            `https://api.open-meteo.com/v1/forecast?latitude=${loc.latitude}&longitude=${loc.longitude}&current=temperature_2m,apparent_temperature,wind_speed_10m,weather_code&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max&timezone=auto&forecast_days=1`
         );
         const d = await res.json();
         return {
@@ -97,7 +114,8 @@ async function getWeather({ city }) {
             feels_like: d.current.apparent_temperature,
             wind: d.current.wind_speed_10m,
             max_today: d.daily.temperature_2m_max[0],
-            min_today: d.daily.temperature_2m_min[0]
+            min_today: d.daily.temperature_2m_min[0],
+            rain_chance: d.daily.precipitation_probability_max[0]
         };
     } catch (e) {
         console.error('WEATHER ERROR:', e.message);
@@ -121,6 +139,37 @@ async function getTime({ city }) {
     return { city: loc.name, current_time: now };
 }
 
+async function getRate({ code }) {
+    const cur = (code || '').toUpperCase();
+    const CRYPTO = { BTC: 'bitcoin', ETH: 'ethereum', TON: 'the-open-network', SOL: 'solana', DOGE: 'dogecoin' };
+
+    try {
+        if (CRYPTO[cur]) {
+            const res = await fetch(
+                `https://api.coingecko.com/api/v3/simple/price?ids=${CRYPTO[cur]}&vs_currencies=usd,rub`
+            );
+            const d = await res.json();
+            const p = d[CRYPTO[cur]];
+            if (!p) return { error: 'Курс не найден' };
+            return { currency: cur, usd: p.usd, rub: p.rub };
+        }
+
+        const res = await fetch(`https://www.cbr-xml-daily.ru/daily_json.js`);
+        const d = await res.json();
+        const v = d.Valute[cur];
+        if (!v) return { error: 'Валюта не найдена' };
+        return {
+            currency: cur,
+            rub: (v.Value / v.Nominal).toFixed(2),
+            source: 'ЦБ РФ',
+            date: d.Date.slice(0, 10)
+        };
+    } catch (e) {
+        console.error('RATE ERROR:', e.message);
+        return { error: 'Не удалось получить курс' };
+    }
+}
+
 async function webSearch({ query }) {
     try {
         const res = await fetch('https://api.tavily.com/search', {
@@ -129,17 +178,22 @@ async function webSearch({ query }) {
             body: JSON.stringify({
                 api_key: TAVILY_KEY,
                 query,
-                max_results: 2,
-                search_depth: 'basic'
+                max_results: 4,
+                search_depth: 'basic',
+                include_answer: true
             })
         });
         const data = await res.json();
-        console.log('SEARCH:', query, '→', data.results ? data.results.length : 0, 'results');
+        console.log('SEARCH:', query, '→', data.results ? data.results.length : 0);
+
+        if (data.answer) {
+            return { summary: data.answer.slice(0, 800) };
+        }
         if (!data.results || !data.results.length) return { error: 'Ничего не найдено' };
         return {
             results: data.results.map((r) => ({
                 title: r.title,
-                content: (r.content || '').slice(0, 400)
+                content: (r.content || '').slice(0, 600)
             }))
         };
     } catch (e) {
@@ -151,6 +205,7 @@ async function webSearch({ query }) {
 const TOOL_IMPL = {
     get_weather: getWeather,
     get_time: getTime,
+    get_rate: getRate,
     web_search: webSearch
 };
 
@@ -164,19 +219,16 @@ async function callGemini(contents) {
                 contents,
                 tools: TOOLS,
                 systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
-                generationConfig: {
-                    maxOutputTokens: 250,
-                    temperature: 0.7
-                }
+                generationConfig: { maxOutputTokens: 300, temperature: 0.7 }
             })
         }
     );
     const data = await res.json();
-    console.log('GEMINI RESPONSE:', JSON.stringify(data).slice(0, 500));
+    console.log('GEMINI:', JSON.stringify(data).slice(0, 400));
 
     if (data.error) throw new Error('API error: ' + JSON.stringify(data.error).slice(0, 200));
     if (!data.candidates || !data.candidates.length) {
-        throw new Error('Нет candidates: ' + JSON.stringify(data).slice(0, 200));
+        throw new Error('Нет candidates');
     }
     return data.candidates[0].content;
 }
@@ -193,16 +245,13 @@ async function askAI(contents) {
         history.push(content);
 
         const calls = (content.parts || []).filter((p) => p.functionCall);
-
-        if (!calls.length) {
-            return { answer: textFrom(content), history };
-        }
+        if (!calls.length) return { answer: textFrom(content), history };
 
         const responses = await Promise.all(
             calls.map(async (p) => {
                 const { name, args } = p.functionCall;
                 const fn = TOOL_IMPL[name];
-                console.log('TOOL CALL:', name, JSON.stringify(args));
+                console.log('TOOL:', name, JSON.stringify(args));
                 let result;
                 try {
                     result = fn ? await fn(args || {}) : { error: 'Неизвестный инструмент' };
@@ -222,18 +271,14 @@ async function askAI(contents) {
 }
 
 module.exports = async function handler(req, res) {
-    if (req.method !== 'POST') {
-        return res.status(405).send('Method not allowed');
-    }
+    if (req.method !== 'POST') return res.status(405).send('Method not allowed');
 
     const body = req.body;
     const sessionId = body.session.session_id;
     const userText = body.request.command || '';
     const isNew = body.session.new;
 
-    if (isNew || !sessions[sessionId]) {
-        sessions[sessionId] = [];
-    }
+    if (isNew || !sessions[sessionId]) sessions[sessionId] = [];
 
     if (isNew) {
         return res.status(200).json(respond('Привет! Спроси меня что-нибудь.', body));
