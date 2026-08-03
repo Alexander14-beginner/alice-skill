@@ -30,17 +30,20 @@ module.exports = async function handler(req, res) {
     const userText = body.request.command;
     const isNew = body.session.new;
 
-    if (isNew) {
-        sessions[sessionId] = [
-            {
-                role: 'system',
-                content: 'Ты голосовой помощник. Отвечай кратко (до 200 символов), разговорным стилем, без мата и без обсуждения 18+ тем.'
-            }
-        ];
-        return res.status(200).json(respond('Привет! Спроси меня что-нибудь.', body));
-    }
+    if (isNew || !sessions[sessionId]) {
+    sessions[sessionId] = [
+      {
+        role: 'system',
+        content: 'Ты голосовой помощник. Отвечай кратко (до 200 символов), разговорным стилем, без мата и без обсуждения 18+ тем.'
+      }
+    ];
+  }
 
-    sessions[sessionId].push({ role: 'user', content: userText });
+  if (isNew) {
+    return res.status(200).json(respond('Привет! Спроси меня что-нибудь.', body));
+  }
+
+  sessions[sessionId].push({ role: 'user', content: userText });
 
     let answer;
     try {
