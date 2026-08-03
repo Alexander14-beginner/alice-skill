@@ -1,7 +1,7 @@
 const sessions = {};
 
-const AITUNNEL_KEY = process.env.AITUNNEL_KEY;
-const TAVILY_KEY = process.env.TAVILY_KEY;
+const GEMINI_KEY = process.env.GEMINI_KEY;
+const MODEL = 'gemini-3.5-flash-lite';
 
 const CITY_ALIASES = {
     'мск': 'Москва', 'москва': 'Москва',
@@ -10,55 +10,44 @@ const CITY_ALIASES = {
     'кзн': 'Казань', 'ростов': 'Ростов-на-Дону'
 };
 
+const SYSTEM_PROMPT =
+    'Ты голосовой помощник в умной колонке. Отвечай ОЧЕНЬ кратко — 1-2 предложения, до 200 символов. Разговорный стиль, без мата и 18+ тем. У тебя есть инструменты для погоды и времени, а также поиск Google для актуальной информации. Никогда не говори, что у тебя нет доступа к данным — вызывай инструменты или ищи.';
+
+// ---------- инструменты ----------
 const TOOLS = [
     {
-        type: 'function',
-        function: {
-            name: 'get_weather',
-            description: 'Актуальная погода в городе. Для вопросов про погоду, температуру, дождь, ветер.',
-            parameters: {
-                type: 'object',
-                properties: {
-                    city: {
-                        type: 'string',
-                        description: 'Город в именительном падеже, например "Москва". Если не указан — "Санкт-Петербург".'
-                    }
-                },
-                required: ['city']
+        functionDeclarations: [
+            {
+                name: 'get_weather',
+                description: 'Актуальная погода в городе: температура, ветер, макс/мин за день.',
+                parameters: {
+                    type: 'OBJECT',
+                    properties: {
+                        city: {
+                            type: 'STRING',
+                            description: 'Город в именительном падеже, например "Москва". Если не указан — "Санкт-Петербург".'
+                        }
+                    },
+                    required: ['city']
+                }
+            },
+            {
+                name: 'get_time',
+                description: 'Текущее время и дата в городе.',
+                parameters: {
+                    type: 'OBJECT',
+                    properties: {
+                        city: {
+                            type: 'STRING',
+                            description: 'Город в именительном падеже. Если не указан — "Санкт-Петербург".'
+                        }
+                    },
+                    required: ['city']
+                }
             }
-        }
+        ]
     },
-    {
-        type: 'function',
-        function: {
-            name: 'get_time',
-            description: 'Текущее время и дата в городе.',
-            parameters: {
-                type: 'object',
-                properties: {
-                    city: {
-                        type: 'string',
-                        description: 'Город в именительном падеже. Если не указан — "Санкт-Петербург".'
-                    }
-                },
-                required: ['city']
-            }
-        }
-    },
-    {
-        type: 'function',
-        function: {
-            name: 'web_search',
-            description: 'Поиск актуальной информации в интернете: новости, курсы, цены, свежие события.',
-            parameters: {
-                type: 'object',
-                properties: {
-                    query: { type: 'string', description: 'Короткий поисковый запрос' }
-                },
-                required: ['query']
-            }
-        }
-    }
+    { googleSearch: {} }
 ];
 
 async function geoLookup(name) {
@@ -119,94 +108,82 @@ async function getTime({ city }) {
     return { city: loc.name, current_time: now };
 }
 
-async function webSearch({ query }) {
-    try {
-        const res = await fetch('https://api.tavily.com/search', {
+const TOOL_IMPL = {
+    get_weather: getWeather,
+    get_time: getTime
+};
+
+// ---------- вызов Gemini ----------
+async function callGemini(contents) {
+    const res = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${GEMINI_KEY}`,
+        {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                api_key: TAVILY_KEY,
-                query,
-                max_results: 2,
-                search_depth: 'basic'
+                contents,
+                tools: TOOLS,
+                systemInstruction: {
+                    parts: [{ text: SYSTEM_PROMPT }]
+                },
+                generationConfig: {
+                    maxOutputTokens: 250,
+                    temperature: 0.7
+                }
             })
-        });
-        const data = await res.json();
-        if (!data.results || !data.results.length) return { error: 'Ничего не найдено' };
-        return {
-            results: data.results.map((r) => ({ title: r.title, content: r.content.slice(0, 400) }))
-        };
-    } catch (e) {
-        console.error('SEARCH ERROR:', e.message);
-        return { error: 'Поиск недоступен' };
-    }
-}
-
-const TOOL_IMPL = {
-    get_weather: getWeather,
-    get_time: getTime,
-    web_search: webSearch
-};
-
-async function callModel(messages) {
-    const res = await fetch('https://api.aitunnel.ru/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${AITUNNEL_KEY}`
-        },
-        body: JSON.stringify({
-            model: 'openai/gpt-5.6-luna',
-            max_tokens: 250,
-            messages,
-            tools: TOOLS
-        })
-    });
+        }
+    );
     const data = await res.json();
-    console.log('MODEL RESPONSE:', JSON.stringify(data).slice(0, 500));
-    return data.choices[0].message;
+    console.log('GEMINI RESPONSE:', JSON.stringify(data).slice(0, 600));
+
+    if (!data.candidates || !data.candidates.length) {
+        throw new Error('Пустой ответ от модели');
+    }
+    return data.candidates[0].content;
 }
 
-async function askAI(history) {
-    let messages = [...history];
+async function askAI(contents) {
+    let history = [...contents];
 
     for (let round = 0; round < 2; round++) {
-        const msg = await callModel(messages);
-        messages.push(msg);
+        const content = await callGemini(history);
+        history.push(content);
 
-        if (!msg.tool_calls || !msg.tool_calls.length) {
-            return { answer: msg.content, messages };
+        const calls = (content.parts || []).filter((p) => p.functionCall);
+
+        if (!calls.length) {
+            const text = (content.parts || [])
+                .map((p) => p.text || '')
+                .join(' ')
+                .trim();
+            return { answer: text, history };
         }
 
-        // все инструменты вызываем параллельно
-        const results = await Promise.all(
-            msg.tool_calls.map(async (call) => {
-                const fn = TOOL_IMPL[call.function.name];
+        const responses = await Promise.all(
+            calls.map(async (p) => {
+                const { name, args } = p.functionCall;
+                const fn = TOOL_IMPL[name];
+                console.log('TOOL CALL:', name, JSON.stringify(args));
+                let result;
                 try {
-                    const args = JSON.parse(call.function.arguments || '{}');
-                    console.log('TOOL CALL:', call.function.name, JSON.stringify(args));
-                    const result = fn ? await fn(args) : { error: 'Неизвестный инструмент' };
-                    return { id: call.id, result };
+                    result = fn ? await fn(args || {}) : { error: 'Неизвестный инструмент' };
                 } catch (e) {
                     console.error('TOOL ERROR:', e.message);
-                    return { id: call.id, result: { error: 'Ошибка выполнения' } };
+                    result = { error: 'Ошибка выполнения' };
                 }
+                return { functionResponse: { name, response: result } };
             })
         );
 
-        for (const r of results) {
-            messages.push({
-                role: 'tool',
-                tool_call_id: r.id,
-                content: JSON.stringify(r.result)
-            });
-        }
+        history.push({ role: 'user', parts: responses });
     }
 
-    const final = await callModel(messages);
-    return { answer: final.content || 'Не смог разобраться.', messages };
+    const final = await callGemini(history);
+    const text = (final.parts || []).map((p) => p.text || '').join(' ').trim();
+    return { answer: text || 'Не смог разобраться.', history };
 }
 
+// ---------- обработчик Алисы ----------
 module.exports = async function handler(req, res) {
     if (req.method !== 'POST') {
         return res.status(405).send('Method not allowed');
@@ -218,34 +195,25 @@ module.exports = async function handler(req, res) {
     const isNew = body.session.new;
 
     if (isNew || !sessions[sessionId]) {
-        sessions[sessionId] = [
-            {
-                role: 'system',
-                content:
-                    'Ты голосовой помощник в умной колонке. Отвечай ОЧЕНЬ кратко — 1-2 предложения, до 200 символов. Разговорный стиль, без мата и 18+ тем. Есть инструменты для погоды, времени и поиска — вызывай их когда нужны актуальные данные. Никогда не говори что у тебя нет доступа к информации.'
-            }
-        ];
+        sessions[sessionId] = [];
     }
 
     if (isNew) {
         return res.status(200).json(respond('Привет! Спроси меня что-нибудь.', body));
     }
 
-    // не даём истории разрастаться — держим системный промпт + последние 10 сообщений
-    if (sessions[sessionId].length > 11) {
-        sessions[sessionId] = [
-            sessions[sessionId][0],
-            ...sessions[sessionId].slice(-10)
-        ];
+    // держим только последние 10 сообщений
+    if (sessions[sessionId].length > 10) {
+        sessions[sessionId] = sessions[sessionId].slice(-10);
     }
 
-    sessions[sessionId].push({ role: 'user', content: userText });
+    sessions[sessionId].push({ role: 'user', parts: [{ text: userText }] });
 
     let answer;
     try {
         const result = await askAI(sessions[sessionId]);
         answer = result.answer || 'Не понял вопрос, попробуй ещё раз.';
-        sessions[sessionId] = result.messages;
+        sessions[sessionId] = result.history;
     } catch (e) {
         console.error('AI ERROR:', e.message);
         answer = 'Извини, что-то пошло не так, попробуй ещё раз.';
