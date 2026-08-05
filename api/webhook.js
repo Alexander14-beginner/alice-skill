@@ -5,8 +5,8 @@ const AITUNNEL_KEY = process.env.AITUNNEL_KEY;
 const TAVILY_KEY = process.env.TAVILY_KEY;
 
 const AITUNNEL_URL = 'https://api.aitunnel.ru/v1/chat/completions';
-const MODEL_FAST = 'claude-haiku-4-5';
-const MODEL_SMART = 'claude-haiku-4-5';
+const MODEL_FAST = 'claude-haiku-4.5';
+const MODEL_SMART = 'claude-haiku-4.5';
 
 const DEFAULT_CITY = 'Санкт-Петербург';
 const ANSWER_TIMEOUT = 4500;
