@@ -10,46 +10,46 @@ const DEFAULT_CITY = 'Санкт-Петербург';
 
 // ---------- таблица городов: координаты и таймзона без обращения к сети ----------
 const CITY_TABLE = [
-  { n: 'Москва', lat: 55.7558, lon: 37.6173, tz: 'Europe/Moscow', alt: ['мск'] },
-  { n: 'Санкт-Петербург', lat: 59.9343, lon: 30.3351, tz: 'Europe/Moscow', alt: ['спб', 'питер', 'петербург', 'ленинград'] },
-  { n: 'Новосибирск', lat: 55.0084, lon: 82.9357, tz: 'Asia/Novosibirsk', alt: ['нск'] },
-  { n: 'Екатеринбург', lat: 56.8389, lon: 60.6057, tz: 'Asia/Yekaterinburg', alt: ['екб'] },
-  { n: 'Казань', lat: 55.7963, lon: 49.1088, tz: 'Europe/Moscow', alt: ['кзн'] },
-  { n: 'Нижний Новгород', lat: 56.3269, lon: 44.0059, tz: 'Europe/Moscow', alt: ['нн'] },
-  { n: 'Челябинск', lat: 55.1644, lon: 61.4368, tz: 'Asia/Yekaterinburg', alt: [] },
-  { n: 'Самара', lat: 53.1959, lon: 50.1002, tz: 'Europe/Samara', alt: [] },
-  { n: 'Омск', lat: 54.9885, lon: 73.3242, tz: 'Asia/Omsk', alt: [] },
-  { n: 'Ростов-на-Дону', lat: 47.2357, lon: 39.7015, tz: 'Europe/Moscow', alt: ['ростов'] },
-  { n: 'Уфа', lat: 54.7388, lon: 55.9721, tz: 'Asia/Yekaterinburg', alt: [] },
-  { n: 'Красноярск', lat: 56.0153, lon: 92.8932, tz: 'Asia/Krasnoyarsk', alt: [] },
-  { n: 'Воронеж', lat: 51.672, lon: 39.1843, tz: 'Europe/Moscow', alt: [] },
-  { n: 'Пермь', lat: 58.0105, lon: 56.2502, tz: 'Asia/Yekaterinburg', alt: [] },
-  { n: 'Волгоград', lat: 48.708, lon: 44.5133, tz: 'Europe/Volgograd', alt: [] },
-  { n: 'Краснодар', lat: 45.0355, lon: 38.9753, tz: 'Europe/Moscow', alt: [] },
-  { n: 'Саратов', lat: 51.5336, lon: 46.0343, tz: 'Europe/Saratov', alt: [] },
-  { n: 'Тюмень', lat: 57.1522, lon: 65.5272, tz: 'Asia/Yekaterinburg', alt: [] },
-  { n: 'Тольятти', lat: 53.5303, lon: 49.3461, tz: 'Europe/Samara', alt: [] },
-  { n: 'Ижевск', lat: 56.8527, lon: 53.2115, tz: 'Europe/Samara', alt: [] },
-  { n: 'Барнаул', lat: 53.3606, lon: 83.7636, tz: 'Asia/Barnaul', alt: [] },
-  { n: 'Иркутск', lat: 52.287, lon: 104.305, tz: 'Asia/Irkutsk', alt: [] },
-  { n: 'Хабаровск', lat: 48.4827, lon: 135.0838, tz: 'Asia/Vladivostok', alt: [] },
-  { n: 'Владивосток', lat: 43.1156, lon: 131.8855, tz: 'Asia/Vladivostok', alt: ['влад'] },
-  { n: 'Ярославль', lat: 57.6261, lon: 39.8845, tz: 'Europe/Moscow', alt: [] },
-  { n: 'Томск', lat: 56.4846, lon: 84.9476, tz: 'Asia/Tomsk', alt: [] },
-  { n: 'Оренбург', lat: 51.7727, lon: 55.0988, tz: 'Asia/Yekaterinburg', alt: [] },
-  { n: 'Кемерово', lat: 55.3547, lon: 86.0873, tz: 'Asia/Novokuznetsk', alt: [] },
-  { n: 'Сочи', lat: 43.5855, lon: 39.7231, tz: 'Europe/Moscow', alt: [] },
-  { n: 'Калининград', lat: 54.7104, lon: 20.4522, tz: 'Europe/Kaliningrad', alt: [] },
-  { n: 'Мурманск', lat: 68.9585, lon: 33.0827, tz: 'Europe/Moscow', alt: [] },
-  { n: 'Минск', lat: 53.9006, lon: 27.559, tz: 'Europe/Minsk', alt: [] },
-  { n: 'Астана', lat: 51.1694, lon: 71.4491, tz: 'Asia/Almaty', alt: [] },
-  { n: 'Лондон', lat: 51.5074, lon: -0.1278, tz: 'Europe/London', alt: [] },
-  { n: 'Париж', lat: 48.8566, lon: 2.3522, tz: 'Europe/Paris', alt: [] },
-  { n: 'Берлин', lat: 52.52, lon: 13.405, tz: 'Europe/Berlin', alt: [] },
-  { n: 'Нью-Йорк', lat: 40.7128, lon: -74.006, tz: 'America/New_York', alt: [] },
-  { n: 'Токио', lat: 35.6762, lon: 139.6503, tz: 'Asia/Tokyo', alt: [] },
-  { n: 'Пекин', lat: 39.9042, lon: 116.4074, tz: 'Asia/Shanghai', alt: [] },
-  { n: 'Дубай', lat: 25.2048, lon: 55.2708, tz: 'Asia/Dubai', alt: [] }
+  { n: 'Москва', lat: 55.7558, lon: 37.6173, tz: 'Europe/Moscow', pr: 'в Москве', alt: ['мск'] },
+  { n: 'Санкт-Петербург', lat: 59.9343, lon: 30.3351, tz: 'Europe/Moscow', pr: 'в Санкт-Петербурге', alt: ['спб', 'питер', 'петербург', 'ленинград'] },
+  { n: 'Новосибирск', lat: 55.0084, lon: 82.9357, tz: 'Asia/Novosibirsk', pr: 'в Новосибирске', alt: ['нск'] },
+  { n: 'Екатеринбург', lat: 56.8389, lon: 60.6057, tz: 'Asia/Yekaterinburg', pr: 'в Екатеринбурге', alt: ['екб'] },
+  { n: 'Казань', lat: 55.7963, lon: 49.1088, tz: 'Europe/Moscow', pr: 'в Казани', alt: ['кзн'] },
+  { n: 'Нижний Новгород', lat: 56.3269, lon: 44.0059, tz: 'Europe/Moscow', pr: 'в Нижнем Новгороде', alt: ['нн'] },
+  { n: 'Челябинск', lat: 55.1644, lon: 61.4368, tz: 'Asia/Yekaterinburg', pr: 'в Челябинске', alt: [] },
+  { n: 'Самара', lat: 53.1959, lon: 50.1002, tz: 'Europe/Samara', pr: 'в Самаре', alt: [] },
+  { n: 'Омск', lat: 54.9885, lon: 73.3242, tz: 'Asia/Omsk', pr: 'в Омске', alt: [] },
+  { n: 'Ростов-на-Дону', lat: 47.2357, lon: 39.7015, tz: 'Europe/Moscow', pr: 'в Ростове-на-Дону', alt: ['ростов'] },
+  { n: 'Уфа', lat: 54.7388, lon: 55.9721, tz: 'Asia/Yekaterinburg', pr: 'в Уфе', alt: [] },
+  { n: 'Красноярск', lat: 56.0153, lon: 92.8932, tz: 'Asia/Krasnoyarsk', pr: 'в Красноярске', alt: [] },
+  { n: 'Воронеж', lat: 51.672, lon: 39.1843, tz: 'Europe/Moscow', pr: 'в Воронеже', alt: [] },
+  { n: 'Пермь', lat: 58.0105, lon: 56.2502, tz: 'Asia/Yekaterinburg', pr: 'в Перми', alt: [] },
+  { n: 'Волгоград', lat: 48.708, lon: 44.5133, tz: 'Europe/Volgograd', pr: 'в Волгограде', alt: [] },
+  { n: 'Краснодар', lat: 45.0355, lon: 38.9753, tz: 'Europe/Moscow', pr: 'в Краснодаре', alt: [] },
+  { n: 'Саратов', lat: 51.5336, lon: 46.0343, tz: 'Europe/Saratov', pr: 'в Саратове', alt: [] },
+  { n: 'Тюмень', lat: 57.1522, lon: 65.5272, tz: 'Asia/Yekaterinburg', pr: 'в Тюмени', alt: [] },
+  { n: 'Тольятти', lat: 53.5303, lon: 49.3461, tz: 'Europe/Samara', pr: 'в Тольятти', alt: [] },
+  { n: 'Ижевск', lat: 56.8527, lon: 53.2115, tz: 'Europe/Samara', pr: 'в Ижевске', alt: [] },
+  { n: 'Барнаул', lat: 53.3606, lon: 83.7636, tz: 'Asia/Barnaul', pr: 'в Барнауле', alt: [] },
+  { n: 'Иркутск', lat: 52.287, lon: 104.305, tz: 'Asia/Irkutsk', pr: 'в Иркутске', alt: [] },
+  { n: 'Хабаровск', lat: 48.4827, lon: 135.0838, tz: 'Asia/Vladivostok', pr: 'в Хабаровске', alt: [] },
+  { n: 'Владивосток', lat: 43.1156, lon: 131.8855, tz: 'Asia/Vladivostok', pr: 'во Владивостоке', alt: ['влад'] },
+  { n: 'Ярославль', lat: 57.6261, lon: 39.8845, tz: 'Europe/Moscow', pr: 'в Ярославле', alt: [] },
+  { n: 'Томск', lat: 56.4846, lon: 84.9476, tz: 'Asia/Tomsk', pr: 'в Томске', alt: [] },
+  { n: 'Оренбург', lat: 51.7727, lon: 55.0988, tz: 'Asia/Yekaterinburg', pr: 'в Оренбурге', alt: [] },
+  { n: 'Кемерово', lat: 55.3547, lon: 86.0873, tz: 'Asia/Novokuznetsk', pr: 'в Кемерово', alt: [] },
+  { n: 'Сочи', lat: 43.5855, lon: 39.7231, tz: 'Europe/Moscow', pr: 'в Сочи', alt: [] },
+  { n: 'Калининград', lat: 54.7104, lon: 20.4522, tz: 'Europe/Kaliningrad', pr: 'в Калининграде', alt: [] },
+  { n: 'Мурманск', lat: 68.9585, lon: 33.0827, tz: 'Europe/Moscow', pr: 'в Мурманске', alt: [] },
+  { n: 'Минск', lat: 53.9006, lon: 27.559, tz: 'Europe/Minsk', pr: 'в Минске', alt: [] },
+  { n: 'Астана', lat: 51.1694, lon: 71.4491, tz: 'Asia/Almaty', pr: 'в Астане', alt: [] },
+  { n: 'Лондон', lat: 51.5074, lon: -0.1278, tz: 'Europe/London', pr: 'в Лондоне', alt: [] },
+  { n: 'Париж', lat: 48.8566, lon: 2.3522, tz: 'Europe/Paris', pr: 'в Париже', alt: [] },
+  { n: 'Берлин', lat: 52.52, lon: 13.405, tz: 'Europe/Berlin', pr: 'в Берлине', alt: [] },
+  { n: 'Нью-Йорк', lat: 40.7128, lon: -74.006, tz: 'America/New_York', pr: 'в Нью-Йорке', alt: [] },
+  { n: 'Токио', lat: 35.6762, lon: 139.6503, tz: 'Asia/Tokyo', pr: 'в Токио', alt: [] },
+  { n: 'Пекин', lat: 39.9042, lon: 116.4074, tz: 'Asia/Shanghai', pr: 'в Пекине', alt: [] },
+  { n: 'Дубай', lat: 25.2048, lon: 55.2708, tz: 'Asia/Dubai', pr: 'в Дубае', alt: [] }
 ];
 
 function norm(s) {
@@ -99,7 +99,7 @@ async function geoLookup(name) {
     const data = await res.json();
     if (data.results && data.results.length) {
       const r = data.results[0];
-      const loc = { n: r.name, lat: r.latitude, lon: r.longitude, tz: r.timezone };
+      const loc = { n: r.name, lat: r.latitude, lon: r.longitude, tz: r.timezone, pr: 'в городе ' + r.name };
       GEO_CACHE[key] = loc;
       return loc;
     }
@@ -138,6 +138,7 @@ async function weatherByLoc(loc) {
     const d = await res.json();
     const data = {
       city: loc.n,
+      pr: loc.pr,
       temp: d.current.temperature_2m,
       feels_like: d.current.apparent_temperature,
       wind: d.current.wind_speed_10m,
@@ -160,15 +161,29 @@ async function getWeather({ city }) {
 }
 
 function timeByLoc(loc) {
-  const now = new Date().toLocaleString('ru-RU', {
+  const parts = new Intl.DateTimeFormat('ru-RU', {
     timeZone: loc.tz,
     hour: '2-digit',
     minute: '2-digit',
+    hourCycle: 'h23',
     weekday: 'long',
     day: 'numeric',
     month: 'long'
-  });
-  return { city: loc.n, current_time: now };
+  }).formatToParts(new Date());
+
+  const get = (t) => (parts.find((p) => p.type === t) || {}).value || '';
+  const hour = parseInt(get('hour'), 10);
+  const minute = parseInt(get('minute'), 10);
+  const date = `${get('weekday')}, ${get('day')} ${get('month')}`;
+
+  return {
+    city: loc.n,
+    pr: loc.pr,
+    hour,
+    minute,
+    date,
+    current_time: `${get('hour')}:${get('minute')}, ${date}`
+  };
 }
 
 async function getTime({ city }) {
@@ -261,15 +276,42 @@ function sign(n) {
   return 'ноль';
 }
 
+function plural(n, one, few, many) {
+  const n10 = n % 10;
+  const n100 = n % 100;
+  if (n10 === 1 && n100 !== 11) return one;
+  if (n10 >= 2 && n10 <= 4 && (n100 < 12 || n100 > 14)) return few;
+  return many;
+}
+
+function cap(s) {
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+// префикс города: свой город не называем, чужой — называем
+function where(d) {
+  if (!d.city || d.city === DEFAULT_CITY) return '';
+  return (d.pr || 'в городе ' + d.city) + ' ';
+}
+
 function fmtWeather(d) {
-  let s = `В городе ${d.city} сейчас ${sign(d.temp)}, ощущается как ${sign(d.feels_like)}. `;
-  s += `Ветер ${Math.round(d.wind)} километров в час, днём от ${sign(d.min_today)} до ${sign(d.max_today)}.`;
-  if (d.rain_chance >= 40) s += ` Вероятность осадков ${d.rain_chance} процентов, лучше взять зонт.`;
-  return s;
+  let s = `${where(d)}сейчас ${sign(d.temp)}`;
+  if (Math.abs(d.temp - d.feels_like) >= 3) s += `, ощущается как ${sign(d.feels_like)}`;
+  s += `. Днём до ${sign(d.max_today)}.`;
+  if (d.rain_chance >= 50) s += ' Возможен дождь, лучше взять зонт.';
+  if (d.wind >= 30) s += ' И сильный ветер.';
+  return cap(s);
 }
 
 function fmtTime(d) {
-  return `В городе ${d.city} сейчас ${d.current_time}.`;
+  const h = `${d.hour} ${plural(d.hour, 'час', 'часа', 'часов')}`;
+  if (d.minute === 0) return cap(`${where(d)}сейчас ровно ${h}.`);
+  const m = `${d.minute} ${plural(d.minute, 'минута', 'минуты', 'минут')}`;
+  return cap(`${where(d)}сейчас ${h} ${m}.`);
+}
+
+function fmtDate(d) {
+  return cap(`${where(d)}сегодня ${d.date}.`);
 }
 
 function fmtRate(d) {
@@ -286,7 +328,8 @@ const FAST_FMT = {
 };
 
 // ---------- ПРЕ-РОУТЕР: ответ вообще без вызова модели ----------
-const TIME_RE = /(скольк( сейчас)? времен|котор( сейчас)? час|скольк на час|как сегодн числ|как сегодн ден|как ден недел|как( сегодн)? дат|как сейчас времен)/;
+const TIME_RE = /(скольк( сейчас)? времен|котор( сейчас)? час|скольк на час|как сейчас времен|точн время)/;
+const DATE_RE = /(как сегодн числ|как сегодн ден|как ден недел|как( сегодн)? дат|как числ сегодн)/;
 const TIME_BLOCK_RE = /(нужн|надо|займ|потреб|уйдет|остал|прошл|чтоб|через|назад|заня)/;
 
 const WEATHER_RE = /(погод|скольк градус|как температур|тепл л|холодн л|дожд|зонт|снег)/;
@@ -324,6 +367,13 @@ async function preRoute(rawText, nluTokens) {
     const loc = cityFromTokens(tokens) || CITY_INDEX[stemPhrase(DEFAULT_CITY)];
     console.log('PRE: time', loc.n);
     return fmtTime(timeByLoc(loc));
+  }
+
+  // дата и день недели
+  if (DATE_RE.test(stemmed) && !TIME_BLOCK_RE.test(stemmed)) {
+    const loc = cityFromTokens(tokens) || CITY_INDEX[stemPhrase(DEFAULT_CITY)];
+    console.log('PRE: date', loc.n);
+    return fmtDate(timeByLoc(loc));
   }
 
   // погода
