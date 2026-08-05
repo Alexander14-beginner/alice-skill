@@ -6,7 +6,7 @@ const AITUNNEL_KEY = process.env.AITUNNEL_KEY;
 const TAVILY_KEY = process.env.TAVILY_KEY;
 
 const GEMINI_MODEL = 'gemini-3.5-flash-lite';
-const HAIKU_MODEL = 'claude-haiku-4.5';
+const LUNA_MODEL = 'gpt-5.6-luna';
 const AITUNNEL_URL = 'https://api.aitunnel.ru/v1/chat/completions';
 
 const DEFAULT_CITY = 'Санкт-Петербург';
@@ -20,52 +20,332 @@ const GREETINGS = [
   'Привет! О чём поговорим?'
 ];
 
-// ---------- таблица городов: координаты и таймзона без обращения к сети ----------
+// ---------- города ----------
 const CITY_TABLE = [
-  { n: 'Москва', lat: 55.7558, lon: 37.6173, tz: 'Europe/Moscow', pr: 'в Москве', alt: ['мск'] },
-  { n: 'Санкт-Петербург', lat: 59.9343, lon: 30.3351, tz: 'Europe/Moscow', pr: 'в Санкт-Петербурге', alt: ['спб', 'питер', 'петербург', 'ленинград'] },
-  { n: 'Новосибирск', lat: 55.0084, lon: 82.9357, tz: 'Asia/Novosibirsk', pr: 'в Новосибирске', alt: ['нск'] },
-  { n: 'Екатеринбург', lat: 56.8389, lon: 60.6057, tz: 'Asia/Yekaterinburg', pr: 'в Екатеринбурге', alt: ['екб'] },
-  { n: 'Казань', lat: 55.7963, lon: 49.1088, tz: 'Europe/Moscow', pr: 'в Казани', alt: ['кзн'] },
-  { n: 'Нижний Новгород', lat: 56.3269, lon: 44.0059, tz: 'Europe/Moscow', pr: 'в Нижнем Новгороде', alt: ['нн'] },
-  { n: 'Челябинск', lat: 55.1644, lon: 61.4368, tz: 'Asia/Yekaterinburg', pr: 'в Челябинске', alt: [] },
-  { n: 'Самара', lat: 53.1959, lon: 50.1002, tz: 'Europe/Samara', pr: 'в Самаре', alt: [] },
-  { n: 'Омск', lat: 54.9885, lon: 73.3242, tz: 'Asia/Omsk', pr: 'в Омске', alt: [] },
-  { n: 'Ростов-на-Дону', lat: 47.2357, lon: 39.7015, tz: 'Europe/Moscow', pr: 'в Ростове-на-Дону', alt: ['ростов'] },
-  { n: 'Уфа', lat: 54.7388, lon: 55.9721, tz: 'Asia/Yekaterinburg', pr: 'в Уфе', alt: [] },
-  { n: 'Красноярск', lat: 56.0153, lon: 92.8932, tz: 'Asia/Krasnoyarsk', pr: 'в Красноярске', alt: [] },
-  { n: 'Воронеж', lat: 51.672, lon: 39.1843, tz: 'Europe/Moscow', pr: 'в Воронеже', alt: [] },
-  { n: 'Пермь', lat: 58.0105, lon: 56.2502, tz: 'Asia/Yekaterinburg', pr: 'в Перми', alt: [] },
-  { n: 'Волгоград', lat: 48.708, lon: 44.5133, tz: 'Europe/Volgograd', pr: 'в Волгограде', alt: [] },
-  { n: 'Краснодар', lat: 45.0355, lon: 38.9753, tz: 'Europe/Moscow', pr: 'в Краснодаре', alt: [] },
-  { n: 'Саратов', lat: 51.5336, lon: 46.0343, tz: 'Europe/Saratov', pr: 'в Саратове', alt: [] },
-  { n: 'Тюмень', lat: 57.1522, lon: 65.5272, tz: 'Asia/Yekaterinburg', pr: 'в Тюмени', alt: [] },
-  { n: 'Тольятти', lat: 53.5303, lon: 49.3461, tz: 'Europe/Samara', pr: 'в Тольятти', alt: [] },
-  { n: 'Ижевск', lat: 56.8527, lon: 53.2115, tz: 'Europe/Samara', pr: 'в Ижевске', alt: [] },
-  { n: 'Барнаул', lat: 53.3606, lon: 83.7636, tz: 'Asia/Barnaul', pr: 'в Барнауле', alt: [] },
-  { n: 'Иркутск', lat: 52.287, lon: 104.305, tz: 'Asia/Irkutsk', pr: 'в Иркутске', alt: [] },
-  { n: 'Хабаровск', lat: 48.4827, lon: 135.0838, tz: 'Asia/Vladivostok', pr: 'в Хабаровске', alt: [] },
-  { n: 'Владивосток', lat: 43.1156, lon: 131.8855, tz: 'Asia/Vladivostok', pr: 'во Владивостоке', alt: ['влад'] },
-  { n: 'Ярославль', lat: 57.6261, lon: 39.8845, tz: 'Europe/Moscow', pr: 'в Ярославле', alt: [] },
-  { n: 'Томск', lat: 56.4846, lon: 84.9476, tz: 'Asia/Tomsk', pr: 'в Томске', alt: [] },
-  { n: 'Оренбург', lat: 51.7727, lon: 55.0988, tz: 'Asia/Yekaterinburg', pr: 'в Оренбурге', alt: [] },
-  { n: 'Кемерово', lat: 55.3547, lon: 86.0873, tz: 'Asia/Novokuznetsk', pr: 'в Кемерово', alt: [] },
-  { n: 'Сочи', lat: 43.5855, lon: 39.7231, tz: 'Europe/Moscow', pr: 'в Сочи', alt: [] },
-  { n: 'Калининград', lat: 54.7104, lon: 20.4522, tz: 'Europe/Kaliningrad', pr: 'в Калининграде', alt: [] },
-  { n: 'Мурманск', lat: 68.9585, lon: 33.0827, tz: 'Europe/Moscow', pr: 'в Мурманске', alt: [] },
-  { n: 'Минск', lat: 53.9006, lon: 27.559, tz: 'Europe/Minsk', pr: 'в Минске', alt: [] },
-  { n: 'Астана', lat: 51.1694, lon: 71.4491, tz: 'Asia/Almaty', pr: 'в Астане', alt: [] },
-  { n: 'Лондон', lat: 51.5074, lon: -0.1278, tz: 'Europe/London', pr: 'в Лондоне', alt: [] },
-  { n: 'Париж', lat: 48.8566, lon: 2.3522, tz: 'Europe/Paris', pr: 'в Париже', alt: [] },
-  { n: 'Берлин', lat: 52.52, lon: 13.405, tz: 'Europe/Berlin', pr: 'в Берлине', alt: [] },
-  { n: 'Нью-Йорк', lat: 40.7128, lon: -74.006, tz: 'America/New_York', pr: 'в Нью-Йорке', alt: [] },
-  { n: 'Токио', lat: 35.6762, lon: 139.6503, tz: 'Asia/Tokyo', pr: 'в Токио', alt: [] },
-  { n: 'Пекин', lat: 39.9042, lon: 116.4074, tz: 'Asia/Shanghai', pr: 'в Пекине', alt: [] },
-  { n: 'Дубай', lat: 25.2048, lon: 55.2708, tz: 'Asia/Dubai', pr: 'в Дубае', alt: [] }
+  {
+    n: 'Москва',
+    lat: 55.7558,
+    lon: 37.6173,
+    tz: 'Europe/Moscow',
+    pr: 'в Москве',
+    alt: ['мск']
+  },
+  {
+    n: 'Санкт-Петербург',
+    lat: 59.9343,
+    lon: 30.3351,
+    tz: 'Europe/Moscow',
+    pr: 'в Санкт-Петербурге',
+    alt: ['спб', 'питер', 'петербург', 'ленинград']
+  },
+  {
+    n: 'Новосибирск',
+    lat: 55.0084,
+    lon: 82.9357,
+    tz: 'Asia/Novosibirsk',
+    pr: 'в Новосибирске',
+    alt: ['нск']
+  },
+  {
+    n: 'Екатеринбург',
+    lat: 56.8389,
+    lon: 60.6057,
+    tz: 'Asia/Yekaterinburg',
+    pr: 'в Екатеринбурге',
+    alt: ['екб']
+  },
+  {
+    n: 'Казань',
+    lat: 55.7963,
+    lon: 49.1088,
+    tz: 'Europe/Moscow',
+    pr: 'в Казани',
+    alt: ['кзн']
+  },
+  {
+    n: 'Нижний Новгород',
+    lat: 56.3269,
+    lon: 44.0059,
+    tz: 'Europe/Moscow',
+    pr: 'в Нижнем Новгороде',
+    alt: ['нн']
+  },
+  {
+    n: 'Челябинск',
+    lat: 55.1644,
+    lon: 61.4368,
+    tz: 'Asia/Yekaterinburg',
+    pr: 'в Челябинске',
+    alt: []
+  },
+  {
+    n: 'Самара',
+    lat: 53.1959,
+    lon: 50.1002,
+    tz: 'Europe/Samara',
+    pr: 'в Самаре',
+    alt: []
+  },
+  {
+    n: 'Омск',
+    lat: 54.9885,
+    lon: 73.3242,
+    tz: 'Asia/Omsk',
+    pr: 'в Омске',
+    alt: []
+  },
+  {
+    n: 'Ростов-на-Дону',
+    lat: 47.2357,
+    lon: 39.7015,
+    tz: 'Europe/Moscow',
+    pr: 'в Ростове-на-Дону',
+    alt: ['ростов']
+  },
+  {
+    n: 'Уфа',
+    lat: 54.7388,
+    lon: 55.9721,
+    tz: 'Asia/Yekaterinburg',
+    pr: 'в Уфе',
+    alt: []
+  },
+  {
+    n: 'Красноярск',
+    lat: 56.0153,
+    lon: 92.8932,
+    tz: 'Asia/Krasnoyarsk',
+    pr: 'в Красноярске',
+    alt: []
+  },
+  {
+    n: 'Воронеж',
+    lat: 51.672,
+    lon: 39.1843,
+    tz: 'Europe/Moscow',
+    pr: 'в Воронеже',
+    alt: []
+  },
+  {
+    n: 'Пермь',
+    lat: 58.0105,
+    lon: 56.2502,
+    tz: 'Asia/Yekaterinburg',
+    pr: 'в Перми',
+    alt: []
+  },
+  {
+    n: 'Волгоград',
+    lat: 48.708,
+    lon: 44.5133,
+    tz: 'Europe/Volgograd',
+    pr: 'в Волгограде',
+    alt: []
+  },
+  {
+    n: 'Краснодар',
+    lat: 45.0355,
+    lon: 38.9753,
+    tz: 'Europe/Moscow',
+    pr: 'в Краснодаре',
+    alt: []
+  },
+  {
+    n: 'Саратов',
+    lat: 51.5336,
+    lon: 46.0343,
+    tz: 'Europe/Saratov',
+    pr: 'в Саратове',
+    alt: []
+  },
+  {
+    n: 'Тюмень',
+    lat: 57.1522,
+    lon: 65.5272,
+    tz: 'Asia/Yekaterinburg',
+    pr: 'в Тюмени',
+    alt: []
+  },
+  {
+    n: 'Тольятти',
+    lat: 53.5303,
+    lon: 49.3461,
+    tz: 'Europe/Samara',
+    pr: 'в Тольятти',
+    alt: []
+  },
+  {
+    n: 'Ижевск',
+    lat: 56.8527,
+    lon: 53.2115,
+    tz: 'Europe/Samara',
+    pr: 'в Ижевске',
+    alt: []
+  },
+  {
+    n: 'Барнаул',
+    lat: 53.3606,
+    lon: 83.7636,
+    tz: 'Asia/Barnaul',
+    pr: 'в Барнауле',
+    alt: []
+  },
+  {
+    n: 'Иркутск',
+    lat: 52.287,
+    lon: 104.305,
+    tz: 'Asia/Irkutsk',
+    pr: 'в Иркутске',
+    alt: []
+  },
+  {
+    n: 'Хабаровск',
+    lat: 48.4827,
+    lon: 135.0838,
+    tz: 'Asia/Vladivostok',
+    pr: 'в Хабаровске',
+    alt: []
+  },
+  {
+    n: 'Владивосток',
+    lat: 43.1156,
+    lon: 131.8855,
+    tz: 'Asia/Vladivostok',
+    pr: 'во Владивостоке',
+    alt: ['влад']
+  },
+  {
+    n: 'Ярославль',
+    lat: 57.6261,
+    lon: 39.8845,
+    tz: 'Europe/Moscow',
+    pr: 'в Ярославле',
+    alt: []
+  },
+  {
+    n: 'Томск',
+    lat: 56.4846,
+    lon: 84.9476,
+    tz: 'Asia/Tomsk',
+    pr: 'в Томске',
+    alt: []
+  },
+  {
+    n: 'Оренбург',
+    lat: 51.7727,
+    lon: 55.0988,
+    tz: 'Asia/Yekaterinburg',
+    pr: 'в Оренбурге',
+    alt: []
+  },
+  {
+    n: 'Кемерово',
+    lat: 55.3547,
+    lon: 86.0873,
+    tz: 'Asia/Novokuznetsk',
+    pr: 'в Кемерове',
+    alt: []
+  },
+  {
+    n: 'Сочи',
+    lat: 43.5855,
+    lon: 39.7231,
+    tz: 'Europe/Moscow',
+    pr: 'в Сочи',
+    alt: []
+  },
+  {
+    n: 'Калининград',
+    lat: 54.7104,
+    lon: 20.4522,
+    tz: 'Europe/Kaliningrad',
+    pr: 'в Калининграде',
+    alt: []
+  },
+  {
+    n: 'Мурманск',
+    lat: 68.9585,
+    lon: 33.0827,
+    tz: 'Europe/Moscow',
+    pr: 'в Мурманске',
+    alt: []
+  },
+  {
+    n: 'Минск',
+    lat: 53.9006,
+    lon: 27.559,
+    tz: 'Europe/Minsk',
+    pr: 'в Минске',
+    alt: []
+  },
+  {
+    n: 'Астана',
+    lat: 51.1694,
+    lon: 71.4491,
+    tz: 'Asia/Almaty',
+    pr: 'в Астане',
+    alt: []
+  },
+  {
+    n: 'Лондон',
+    lat: 51.5074,
+    lon: -0.1278,
+    tz: 'Europe/London',
+    pr: 'в Лондоне',
+    alt: []
+  },
+  {
+    n: 'Париж',
+    lat: 48.8566,
+    lon: 2.3522,
+    tz: 'Europe/Paris',
+    pr: 'в Париже',
+    alt: []
+  },
+  {
+    n: 'Берлин',
+    lat: 52.52,
+    lon: 13.405,
+    tz: 'Europe/Berlin',
+    pr: 'в Берлине',
+    alt: []
+  },
+  {
+    n: 'Нью-Йорк',
+    lat: 40.7128,
+    lon: -74.006,
+    tz: 'America/New_York',
+    pr: 'в Нью-Йорке',
+    alt: []
+  },
+  {
+    n: 'Токио',
+    lat: 35.6762,
+    lon: 139.6503,
+    tz: 'Asia/Tokyo',
+    pr: 'в Токио',
+    alt: []
+  },
+  {
+    n: 'Пекин',
+    lat: 39.9042,
+    lon: 116.4074,
+    tz: 'Asia/Shanghai',
+    pr: 'в Пекине',
+    alt: []
+  },
+  {
+    n: 'Дубай',
+    lat: 25.2048,
+    lon: 55.2708,
+    tz: 'Asia/Dubai',
+    pr: 'в Дубае',
+    alt: []
+  }
 ];
 
-function norm(s) {
-  return (s || '')
+function norm(value) {
+  return String(value || '')
     .toLowerCase()
     .replace(/ё/g, 'е')
     .replace(/[^a-zа-я0-9 -]/g, ' ')
@@ -74,17 +354,19 @@ function norm(s) {
     .trim();
 }
 
-function stem(w) {
-  if (w.length <= 2) return w;
+function stem(word) {
+  if (word.length <= 2) {
+    return word;
+  }
 
-  return w.replace(
+  return word.replace(
     /(ами|ями|ое|ые|ие|ом|ем|ой|ей|ах|ях|ов|ев|ий|ый|ая|яя|ую|юю|ья|а|о|у|е|ы|и|я|ю|й|ь)$/,
     ''
   );
 }
 
-function stemPhrase(s) {
-  return norm(s)
+function stemPhrase(value) {
+  return norm(value)
     .split(' ')
     .map(stem)
     .join(' ');
@@ -124,7 +406,9 @@ async function geoLookup(name) {
 
   try {
     const response = await fetch(
-      `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(name)}&count=1&language=ru`
+      `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(
+        name
+      )}&count=1&language=ru`
     );
 
     const data = await response.json();
@@ -137,10 +421,11 @@ async function geoLookup(name) {
         lat: result.latitude,
         lon: result.longitude,
         tz: result.timezone,
-        pr: 'в городе ' + result.name
+        pr: `в городе ${result.name}`
       };
 
       GEO_CACHE[key] = location;
+
       return location;
     }
   } catch (error) {
@@ -157,7 +442,7 @@ async function resolveCity(rawName) {
     return CITY_INDEX[key];
   }
 
-  return await geoLookup(rawName);
+  return geoLookup(rawName);
 }
 
 function cityFromTokens(tokens) {
@@ -181,7 +466,7 @@ function cityFromTokens(tokens) {
   return null;
 }
 
-// ---------- погода словами ----------
+// ---------- погода ----------
 const WMO = {
   0: 'ясно',
   1: 'малооблачно',
@@ -217,7 +502,6 @@ function describe(code) {
   return WMO[code] || 'облачно';
 }
 
-// ---------- погода ----------
 async function weatherByLoc(location) {
   const key = location.n;
 
@@ -249,6 +533,7 @@ async function weatherByLoc(location) {
       max_today: raw.daily.temperature_2m_max[0],
       min_today: raw.daily.temperature_2m_min[0],
       rain_chance: raw.daily.precipitation_probability_max[0],
+
       tomorrow: {
         code: raw.daily.weather_code[1],
         max: raw.daily.temperature_2m_max[1],
@@ -281,7 +566,7 @@ async function getWeather({ city }) {
     };
   }
 
-  return await weatherByLoc(location);
+  return weatherByLoc(location);
 }
 
 // ---------- время ----------
@@ -330,7 +615,7 @@ async function getTime({ city }) {
 
 // ---------- курсы ----------
 async function getRate({ code }) {
-  const currency = (code || '').toUpperCase();
+  const currency = String(code || '').toUpperCase();
 
   if (fresh(RATE_CACHE[currency], RATE_TTL)) {
     return RATE_CACHE[currency].data;
@@ -408,7 +693,7 @@ async function getRate({ code }) {
   }
 }
 
-// ---------- поиск ----------
+// ---------- веб-поиск ----------
 async function webSearch({ query }) {
   if (!TAVILY_KEY) {
     return {
@@ -421,9 +706,11 @@ async function webSearch({ query }) {
       'https://api.tavily.com/search',
       {
         method: 'POST',
+
         headers: {
           'Content-Type': 'application/json'
         },
+
         body: JSON.stringify({
           api_key: TAVILY_KEY,
           query,
@@ -458,7 +745,7 @@ async function webSearch({ query }) {
     return {
       results: data.results.map((result) => ({
         title: result.title,
-        content: (result.content || '').slice(0, 500)
+        content: String(result.content || '').slice(0, 500)
       }))
     };
   } catch (error) {
@@ -477,7 +764,7 @@ const TOOL_IMPL = {
   web_search: webSearch
 };
 
-// ---------- шаблоны ответов ----------
+// ---------- форматирование ответов ----------
 function plural(number, one, few, many) {
   const lastDigit = number % 10;
   const lastTwoDigits = number % 100;
@@ -509,11 +796,11 @@ function sign(number) {
   const rounded = Math.round(number);
 
   if (rounded > 0) {
-    return 'плюс ' + rounded;
+    return `плюс ${rounded}`;
   }
 
   if (rounded < 0) {
-    return 'минус ' + Math.abs(rounded);
+    return `минус ${Math.abs(rounded)}`;
   }
 
   return 'ноль';
@@ -524,7 +811,7 @@ function where(data) {
     return '';
   }
 
-  return (data.pr || 'в городе ' + data.city) + ' ';
+  return `${data.pr || `в городе ${data.city}`} `;
 }
 
 function precipWord(maxTemperature) {
@@ -625,7 +912,10 @@ const FAST_FMT = {
   get_rate: fmtRate
 };
 
-// ---------- пре-роутер ----------
+// ---------- локальный пре-роутер ----------
+const HELLO_RE =
+  /^(привет|здравствуй|здравствуйте|хай|салют|доброе утро|добрый день|добрый вечер)$/;
+
 const REPEAT_RE =
   /(повтор|ещ раз|что ты сказа|не расслыш|не понял что ты)/;
 
@@ -644,7 +934,8 @@ const WEATHER_RE =
 const WEATHER_BLOCK_RE =
   /(почем|объясн|сравн|послезавтр|вчер|недел|выходн|через|был|мес|прогноз на)/;
 
-const TOMORROW_RE = /(^| )завтр/;
+const TOMORROW_RE =
+  /(^| )завтр/;
 
 const RATE_RE =
   /(курс|скольк сто|почем доллар|почем евр|почем биткоин)/;
@@ -700,7 +991,25 @@ async function preRoute(
     .map(stem)
     .join(' ');
 
-  const cityHere = cityFromTokens(tokens);
+  const cityHere =
+    cityFromTokens(tokens);
+
+  if (HELLO_RE.test(plain)) {
+    const answer =
+      GREETINGS[
+        Math.floor(
+          Math.random() * GREETINGS.length
+        )
+      ];
+
+    console.log('PRE: greeting');
+
+    return {
+      answer,
+      intent: 'greeting',
+      city: context.city
+    };
+  }
 
   if (
     REPEAT_RE.test(stemmed) &&
@@ -719,7 +1028,8 @@ async function preRoute(
     TIME_RE.test(stemmed) &&
     !TIME_BLOCK_RE.test(stemmed)
   ) {
-    const location = cityHere || HOME;
+    const location =
+      cityHere || HOME;
 
     console.log(
       'PRE: time',
@@ -727,7 +1037,9 @@ async function preRoute(
     );
 
     return {
-      answer: fmtTime(timeByLoc(location)),
+      answer: fmtTime(
+        timeByLoc(location)
+      ),
       intent: 'time',
       city: location.n
     };
@@ -737,7 +1049,8 @@ async function preRoute(
     DATE_RE.test(stemmed) &&
     !TIME_BLOCK_RE.test(stemmed)
   ) {
-    const location = cityHere || HOME;
+    const location =
+      cityHere || HOME;
 
     console.log(
       'PRE: date',
@@ -745,7 +1058,9 @@ async function preRoute(
     );
 
     return {
-      answer: fmtDate(timeByLoc(location)),
+      answer: fmtDate(
+        timeByLoc(location)
+      ),
       intent: 'date',
       city: location.n
     };
@@ -757,7 +1072,9 @@ async function preRoute(
   ) {
     const contextCity =
       context.city
-        ? CITY_INDEX[stemPhrase(context.city)]
+        ? CITY_INDEX[
+            stemPhrase(context.city)
+          ]
         : null;
 
     const location =
@@ -775,7 +1092,9 @@ async function preRoute(
       console.log(
         'PRE: weather',
         location.n,
-        tomorrow ? 'завтра' : 'сегодня'
+        tomorrow
+          ? 'завтра'
+          : 'сегодня'
       );
 
       return {
@@ -783,10 +1102,12 @@ async function preRoute(
           tomorrow
             ? fmtWeatherTomorrow(data)
             : fmtWeather(data),
+
         intent:
           tomorrow
             ? 'weather_tomorrow'
             : 'weather',
+
         city: location.n
       };
     }
@@ -796,10 +1117,12 @@ async function preRoute(
     RATE_RE.test(stemmed) &&
     !RATE_BLOCK_RE.test(stemmed)
   ) {
-    const code = currencyFrom(stemmed);
+    const code =
+      currencyFrom(stemmed);
 
     if (code) {
-      const data = await getRate({ code });
+      const data =
+        await getRate({ code });
 
       if (!data.error) {
         console.log(
@@ -825,7 +1148,8 @@ async function preRoute(
       context.intent === 'time' ||
       context.intent === 'date'
     ) {
-      const time = timeByLoc(cityHere);
+      const time =
+        timeByLoc(cityHere);
 
       console.log(
         'PRE: follow-up',
@@ -838,6 +1162,7 @@ async function preRoute(
           context.intent === 'time'
             ? fmtTime(time)
             : fmtDate(time),
+
         intent: context.intent,
         city: cityHere.n
       };
@@ -862,6 +1187,7 @@ async function preRoute(
             context.intent === 'weather_tomorrow'
               ? fmtWeatherTomorrow(data)
               : fmtWeather(data),
+
           intent: context.intent,
           city: cityHere.n
         };
@@ -873,19 +1199,18 @@ async function preRoute(
 }
 
 // ---------- выбор модели ----------
-function wantsHaiku(text) {
-  const words = norm(text)
+function wantsLuna(text) {
+  return norm(text)
     .split(' ')
-    .filter(Boolean);
-
-  return words.includes('продумай');
+    .filter(Boolean)
+    .includes('продумай');
 }
 
 function pickMode(text) {
-  if (wantsHaiku(text)) {
+  if (wantsLuna(text)) {
     return {
-      provider: 'haiku',
-      model: HAIKU_MODEL,
+      provider: 'luna',
+      model: LUNA_MODEL,
       tokens: 400
     };
   }
@@ -897,16 +1222,17 @@ function pickMode(text) {
   };
 }
 
+// Никакой отдельной команды размышлять здесь нет.
 const SYSTEM_PROMPT =
   'Ты голосовой ассистент в умной колонке. Тебя слушают, а не читают. ' +
-  'Говори живо и по-человечески, 1-3 предложения. Начинай сразу с сути: никаких "Конечно", "Отличный вопрос", "Давайте разберёмся". ' +
-  'Можно лёгкая ирония и своё мнение. Без списков, markdown, эмодзи и скобок — в речи это звучит мусором. Без мата и 18+ тем. ' +
-  'ВАЖНО: никогда не называй цифры, курсы, цены и статистику по памяти — только из результатов инструментов. ' +
+  'Говори живо и по-человечески, обычно 1-3 предложения. ' +
+  'Начинай сразу с сути: никаких "Конечно", "Отличный вопрос" и "Давайте разберёмся". ' +
+  'Без списков, markdown, эмодзи и скобок. Без мата и тем 18+. ' +
+  'Не называй актуальные цифры, курсы, цены и статистику по памяти — используй инструменты. ' +
   'Для погоды вызывай get_weather. Для времени и даты вызывай get_time. ' +
-  'Для курсов валют и криптовалют вызывай get_rate. Для новостей, цен, событий и свежих фактов вызывай web_search. ' +
-  'Названия технологий пиши так, как их произносят разработчики: Flask — флэск, Django — джанго, SQL — эс-ку-эль, FastAPI — фаст эй пи ай. Не переводи названия на русский. ' +
-  'При вычислениях с дробями посчитай по шагам про себя и проверь порядок величины обратным умножением, вслух скажи только результат. ' +
-  'Если инструмент вернул ошибку — честно скажи, что не смог узнать, но не выдумывай данные.';
+  'Для курсов валют и криптовалют вызывай get_rate. ' +
+  'Для новостей, цен, событий и свежих фактов вызывай web_search. ' +
+  'Если инструмент вернул ошибку, честно скажи, что не смог получить данные, и ничего не выдумывай.';
 
 // ---------- инструменты Gemini ----------
 const GEMINI_TOOLS = [
@@ -914,41 +1240,52 @@ const GEMINI_TOOLS = [
     functionDeclarations: [
       {
         name: 'get_weather',
-        description: 'Актуальная погода в городе.',
+        description:
+          'Получает актуальную погоду в городе.',
+
         parameters: {
           type: 'OBJECT',
+
           properties: {
             city: {
               type: 'STRING',
               description:
-                'Город в именительном падеже, например "Москва". Всегда приводи к именительному падежу.'
+                'Город в именительном падеже, например Москва.'
             }
           },
+
           required: ['city']
         }
       },
+
       {
         name: 'get_time',
         description:
-          'Текущее время и дата в городе.',
+          'Получает текущее время и дату в городе.',
+
         parameters: {
           type: 'OBJECT',
+
           properties: {
             city: {
               type: 'STRING',
               description:
-                'Город в именительном падеже. Если не указан — "Санкт-Петербург".'
+                'Город в именительном падеже. Если город не указан, передай Санкт-Петербург.'
             }
           },
+
           required: ['city']
         }
       },
+
       {
         name: 'get_rate',
         description:
-          'Точный курс валюты или криптовалюты. Используй всегда для вопросов про доллар, евро, биткоин и любые курсы.',
+          'Получает актуальный курс валюты или криптовалюты.',
+
         parameters: {
           type: 'OBJECT',
+
           properties: {
             code: {
               type: 'STRING',
@@ -956,22 +1293,27 @@ const GEMINI_TOOLS = [
                 'Код валюты: USD, EUR, CNY, BTC, ETH и так далее.'
             }
           },
+
           required: ['code']
         }
       },
+
       {
         name: 'web_search',
         description:
-          'Поиск в интернете: новости, события, цены товаров, факты о компаниях, спорт, всё что могло измениться.',
+          'Ищет свежую информацию: новости, события, цены, компании, спорт и другие изменяемые факты.',
+
         parameters: {
           type: 'OBJECT',
+
           properties: {
             query: {
               type: 'STRING',
               description:
-                'Конкретный поисковый запрос. Формулируй точно, не общими словами.'
+                'Конкретный поисковый запрос на русском языке.'
             }
           },
+
           required: ['query']
         }
       }
@@ -979,16 +1321,19 @@ const GEMINI_TOOLS = [
   }
 ];
 
-// ---------- инструменты Claude через AITUNNEL ----------
+// ---------- инструменты Luna ----------
 const OPENAI_TOOLS = [
   {
     type: 'function',
+
     function: {
       name: 'get_weather',
       description:
-        'Актуальная погода в городе.',
+        'Получает актуальную погоду в городе.',
+
       parameters: {
         type: 'object',
+
         properties: {
           city: {
             type: 'string',
@@ -996,39 +1341,49 @@ const OPENAI_TOOLS = [
               'Город в именительном падеже, например Москва.'
           }
         },
+
         required: ['city'],
         additionalProperties: false
       }
     }
   },
+
   {
     type: 'function',
+
     function: {
       name: 'get_time',
       description:
-        'Текущее время и дата в городе.',
+        'Получает текущее время и дату в городе.',
+
       parameters: {
         type: 'object',
+
         properties: {
           city: {
             type: 'string',
             description:
-              'Город в именительном падеже. Если не указан — Санкт-Петербург.'
+              'Город в именительном падеже. Если город не указан, передай Санкт-Петербург.'
           }
         },
+
         required: ['city'],
         additionalProperties: false
       }
     }
   },
+
   {
     type: 'function',
+
     function: {
       name: 'get_rate',
       description:
-        'Точный курс валюты или криптовалюты. Используй всегда для вопросов про любые курсы.',
+        'Получает актуальный курс валюты или криптовалюты.',
+
       parameters: {
         type: 'object',
+
         properties: {
           code: {
             type: 'string',
@@ -1036,26 +1391,32 @@ const OPENAI_TOOLS = [
               'Код валюты: USD, EUR, CNY, BTC, ETH и так далее.'
           }
         },
+
         required: ['code'],
         additionalProperties: false
       }
     }
   },
+
   {
     type: 'function',
+
     function: {
       name: 'web_search',
       description:
-        'Поиск в интернете: новости, события, цены товаров, компании, спорт и всё, что могло измениться.',
+        'Ищет свежую информацию: новости, события, цены, компании, спорт и другие изменяемые факты.',
+
       parameters: {
         type: 'object',
+
         properties: {
           query: {
             type: 'string',
             description:
-              'Конкретный поисковый запрос.'
+              'Конкретный поисковый запрос на русском языке.'
           }
         },
+
         required: ['query'],
         additionalProperties: false
       }
@@ -1077,6 +1438,7 @@ function toGeminiContents(history) {
       message.role === 'assistant'
         ? 'model'
         : 'user',
+
     parts: [
       {
         text: message.content
@@ -1096,12 +1458,15 @@ async function runTool(name, args) {
   );
 
   try {
-    return implementation
-      ? await implementation(args || {})
-      : {
-          error:
-            'Неизвестный инструмент'
-        };
+    if (!implementation) {
+      return {
+        error: 'Неизвестный инструмент'
+      };
+    }
+
+    return await implementation(
+      args || {}
+    );
   } catch (error) {
     console.error(
       'TOOL ERROR:',
@@ -1109,13 +1474,12 @@ async function runTool(name, args) {
     );
 
     return {
-      error:
-        'Ошибка выполнения'
+      error: 'Ошибка выполнения'
     };
   }
 }
 
-// ---------- Gemini 3.5 Flash-Lite ----------
+// ---------- Gemini ----------
 async function callGemini(
   contents,
   mode
@@ -1126,34 +1490,42 @@ async function callGemini(
     );
   }
 
-  const started = Date.now();
+  const started =
+    Date.now();
 
-  const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${mode.model}:generateContent?key=${GEMINI_KEY}`,
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type':
-          'application/json'
-      },
-      body: JSON.stringify({
-        contents,
-        tools: GEMINI_TOOLS,
-        systemInstruction: {
-          parts: [
-            {
-              text: SYSTEM_PROMPT
-            }
-          ]
+  const response =
+    await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${mode.model}:generateContent?key=${GEMINI_KEY}`,
+
+      {
+        method: 'POST',
+
+        headers: {
+          'Content-Type':
+            'application/json'
         },
-        generationConfig: {
-          maxOutputTokens:
-            mode.tokens,
-          temperature: 0.9
-        }
-      })
-    }
-  );
+
+        body: JSON.stringify({
+          contents,
+          tools: GEMINI_TOOLS,
+
+          systemInstruction: {
+            parts: [
+              {
+                text: SYSTEM_PROMPT
+              }
+            ]
+          },
+
+          generationConfig: {
+            maxOutputTokens:
+              mode.tokens,
+
+            temperature: 0.9
+          }
+        })
+      }
+    );
 
   const rawText =
     await response.text();
@@ -1161,7 +1533,8 @@ async function callGemini(
   let data;
 
   try {
-    data = JSON.parse(rawText);
+    data =
+      JSON.parse(rawText);
   } catch (error) {
     throw new Error(
       'Gemini вернул не JSON: ' +
@@ -1256,6 +1629,7 @@ async function askGemini(
           return {
             name,
             result,
+
             functionResponse: {
               name,
               response: result
@@ -1268,7 +1642,9 @@ async function askGemini(
       round === 0 &&
       responses.length === 1
     ) {
-      const item = responses[0];
+      const item =
+        responses[0];
+
       const formatter =
         FAST_FMT[item.name];
 
@@ -1289,12 +1665,14 @@ async function askGemini(
 
     history.push({
       role: 'user',
-      parts: responses.map(
-        (item) => ({
-          functionResponse:
-            item.functionResponse
-        })
-      )
+
+      parts:
+        responses.map(
+          (item) => ({
+            functionResponse:
+              item.functionResponse
+          })
+        )
     });
   }
 
@@ -1310,13 +1688,15 @@ async function askGemini(
   );
 }
 
-// ---------- Claude Haiku 4.5 через AITUNNEL ----------
+// ---------- Luna через AITUNNEL ----------
 function safeJsonParse(value) {
   if (!value) {
     return {};
   }
 
-  if (typeof value === 'object') {
+  if (
+    typeof value === 'object'
+  ) {
     return value;
   }
 
@@ -1332,7 +1712,7 @@ function safeJsonParse(value) {
   }
 }
 
-async function callAITunnel(
+async function callLuna(
   messages,
   mode
 ) {
@@ -1342,34 +1722,47 @@ async function callAITunnel(
     );
   }
 
-  const started = Date.now();
+  const started =
+    Date.now();
 
-  const response = await fetch(
-    AITUNNEL_URL,
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type':
-          'application/json',
-        Authorization:
-          `Bearer ${AITUNNEL_KEY}`
-      },
-      body: JSON.stringify({
-        model: mode.model,
-        messages: [
-          {
-            role: 'system',
-            content: SYSTEM_PROMPT
-          },
-          ...messages
-        ],
-        tools: OPENAI_TOOLS,
-        tool_choice: 'auto',
-        max_tokens: mode.tokens,
-        temperature: 0.7
-      })
-    }
-  );
+  const response =
+    await fetch(
+      AITUNNEL_URL,
+
+      {
+        method: 'POST',
+
+        headers: {
+          'Content-Type':
+            'application/json',
+
+          Authorization:
+            `Bearer ${AITUNNEL_KEY}`
+        },
+
+        body: JSON.stringify({
+          model: mode.model,
+
+          messages: [
+            {
+              role: 'system',
+              content: SYSTEM_PROMPT
+            },
+
+            ...messages
+          ],
+
+          tools: OPENAI_TOOLS,
+          tool_choice: 'auto',
+
+          max_tokens:
+            mode.tokens
+
+          // reasoning_effort здесь специально отсутствует.
+          // Отдельной инструкции размышлять тоже нет.
+        })
+      }
+    );
 
   const rawText =
     await response.text();
@@ -1377,7 +1770,8 @@ async function callAITunnel(
   let data;
 
   try {
-    data = JSON.parse(rawText);
+    data =
+      JSON.parse(rawText);
   } catch (error) {
     throw new Error(
       'AITUNNEL вернул не JSON: ' +
@@ -1386,7 +1780,7 @@ async function callAITunnel(
   }
 
   console.log(
-    'AITUNNEL:',
+    'AITUNNEL LUNA:',
     mode.model,
     response.status,
     `${Date.now() - started}ms`,
@@ -1457,7 +1851,7 @@ function textFromOpenAI(message) {
   return '';
 }
 
-async function askHaiku(
+async function askLuna(
   messages,
   mode
 ) {
@@ -1473,7 +1867,7 @@ async function askHaiku(
     round++
   ) {
     const message =
-      await callAITunnel(
+      await callLuna(
         history,
         mode
       );
@@ -1491,9 +1885,11 @@ async function askHaiku(
 
     history.push({
       role: 'assistant',
+
       content:
         textFromOpenAI(message) ||
         null,
+
       tool_calls: calls
     });
 
@@ -1527,8 +1923,10 @@ async function askHaiku(
     for (const item of responses) {
       history.push({
         role: 'tool',
+
         tool_call_id:
           item.call.id,
+
         content:
           JSON.stringify(
             item.result
@@ -1540,7 +1938,9 @@ async function askHaiku(
       round === 0 &&
       responses.length === 1
     ) {
-      const item = responses[0];
+      const item =
+        responses[0];
+
       const formatter =
         FAST_FMT[item.name];
 
@@ -1549,7 +1949,7 @@ async function askHaiku(
         !item.result.error
       ) {
         console.log(
-          'FAST PATH: HAIKU',
+          'FAST PATH: LUNA',
           item.name
         );
 
@@ -1561,7 +1961,7 @@ async function askHaiku(
   }
 
   const final =
-    await callAITunnel(
+    await callLuna(
       history,
       mode
     );
@@ -1576,23 +1976,25 @@ async function askSelected(
   messages,
   mode
 ) {
-  if (mode.provider === 'haiku') {
+  if (
+    mode.provider === 'luna'
+  ) {
     try {
-      return await askHaiku(
+      return await askLuna(
         messages,
         mode
       );
     } catch (error) {
       console.error(
-        'HAIKU ERROR:',
+        'LUNA ERROR:',
         error.message
       );
 
       console.log(
-        'FALLBACK: HAIKU → GEMINI'
+        'FALLBACK: LUNA → GEMINI'
       );
 
-      return await askGemini(
+      return askGemini(
         messages,
         {
           provider: 'gemini',
@@ -1603,28 +2005,32 @@ async function askSelected(
     }
   }
 
-  return await askGemini(
+  return askGemini(
     messages,
     mode
   );
 }
 
-// ---------- прогрев кэшей ----------
+// ---------- прогрев ----------
 async function warmup() {
   try {
     await Promise.all([
       weatherByLoc(HOME),
+
       weatherByLoc(
         CITY_INDEX[
           stemPhrase('Москва')
         ]
       ),
+
       getRate({
         code: 'USD'
       })
     ]);
 
-    console.log('WARMUP done');
+    console.log(
+      'WARMUP done'
+    );
   } catch (error) {
     console.error(
       'WARMUP ERROR:',
@@ -1633,7 +2039,7 @@ async function warmup() {
   }
 }
 
-// ---------- обработчик Алисы ----------
+// ---------- webhook Алисы ----------
 module.exports =
   async function handler(req, res) {
     if (req.method === 'GET') {
@@ -1650,9 +2056,14 @@ module.exports =
         .send('Method not allowed');
     }
 
-    const body = req.body || {};
-    const session = body.session || {};
-    const request = body.request || {};
+    const body =
+      req.body || {};
+
+    const session =
+      body.session || {};
+
+    const request =
+      body.request || {};
 
     const sessionId =
       session.session_id ||
@@ -1663,7 +2074,9 @@ module.exports =
 
     const nluTokens =
       request.nlu &&
-      Array.isArray(request.nlu.tokens)
+      Array.isArray(
+        request.nlu.tokens
+      )
         ? request.nlu.tokens
         : [];
 
@@ -1684,7 +2097,12 @@ module.exports =
       ctxStore[sessionId] = {};
     }
 
-    if (isNew) {
+    // Приветствуем только если навык
+    // запущен действительно без вопроса.
+    if (
+      isNew &&
+      !userText.trim()
+    ) {
       const greeting =
         GREETINGS[
           Math.floor(
@@ -1696,7 +2114,10 @@ module.exports =
       return res
         .status(200)
         .json(
-          respond(greeting, body)
+          respond(
+            greeting,
+            body
+          )
         );
     }
 
@@ -1716,10 +2137,10 @@ module.exports =
     const mode =
       pickMode(userText);
 
-    // Слово «продумай» всегда направляет запрос в Haiku.
+    // Слово «продумай» всегда ведёт в Luna.
     // Остальные запросы сначала проверяются локально.
     if (
-      mode.provider !== 'haiku'
+      mode.provider !== 'luna'
     ) {
       try {
         const quick =
@@ -1779,6 +2200,7 @@ module.exports =
             sessions[sessionId],
             mode
           ),
+
           new Promise((resolve) => {
             setTimeout(
               () => resolve(null),
@@ -1811,7 +2233,9 @@ module.exports =
         'Извини, что-то пошло не так, попробуй ещё раз.';
     }
 
-    if (answer.length > 1000) {
+    if (
+      answer.length > 1000
+    ) {
       answer =
         answer.slice(0, 1000);
     }
@@ -1833,7 +2257,10 @@ module.exports =
     return res
       .status(200)
       .json(
-        respond(answer, body)
+        respond(
+          answer,
+          body
+        )
       );
   };
 
@@ -1854,6 +2281,7 @@ function respond(text, body) {
       tts,
       end_session: false
     },
+
     session: body.session,
     version: body.version
   };
