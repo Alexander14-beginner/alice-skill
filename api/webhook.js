@@ -1,4 +1,5 @@
 const sessions = {};
+const ctxStore = {};
 
 const GEMINI_KEY = process.env.GEMINI_KEY;
 const TAVILY_KEY = process.env.TAVILY_KEY;
@@ -7,6 +8,15 @@ const MODEL_FAST = 'gemini-3.5-flash-lite';
 const MODEL_SMART = 'gemini-3.5-flash-lite';
 
 const DEFAULT_CITY = 'Санкт-Петербург';
+const ANSWER_TIMEOUT = 4500;
+
+const GREETINGS = [
+  'Привет! Спроси меня что-нибудь.',
+  'На связи. Что интересует?',
+  'Привет! Слушаю тебя.',
+  'Здесь. Спрашивай.',
+  'Привет! О чём поговорим?'
+];
 
 // ---------- таблица городов: координаты и таймзона без обращения к сети ----------
 const CITY_TABLE = [
@@ -77,6 +87,8 @@ for (const c of CITY_TABLE) {
   for (const a of c.alt) CITY_INDEX[stemPhrase(a)] = c;
 }
 
+const HOME = CITY_INDEX[stemPhrase(DEFAULT_CITY)];
+
 // ---------- кэши ----------
 const GEO_CACHE = {};
 const WEATHER_CACHE = {};
@@ -126,6 +138,42 @@ function cityFromTokens(tokens) {
   return null;
 }
 
+// ---------- погода словами (коды WMO) ----------
+const WMO = {
+  0: 'ясно',
+  1: 'малооблачно',
+  2: 'переменная облачность',
+  3: 'пасмурно',
+  45: 'туман',
+  48: 'туман с изморозью',
+  51: 'морось',
+  53: 'морось',
+  55: 'сильная морось',
+  56: 'ледяная морось',
+  57: 'ледяная морось',
+  61: 'небольшой дождь',
+  63: 'дождь',
+  65: 'сильный дождь',
+  66: 'ледяной дождь',
+  67: 'ледяной дождь',
+  71: 'небольшой снег',
+  73: 'снег',
+  75: 'сильный снегопад',
+  77: 'снежная крупа',
+  80: 'кратковременный дождь',
+  81: 'ливень',
+  82: 'сильный ливень',
+  85: 'снегопад',
+  86: 'сильный снегопад',
+  95: 'гроза',
+  96: 'гроза с градом',
+  99: 'гроза с градом'
+};
+
+function describe(code) {
+  return WMO[code] || 'облачно';
+}
+
 // ---------- данные ----------
 async function weatherByLoc(loc) {
   const key = loc.n;
@@ -133,18 +181,28 @@ async function weatherByLoc(loc) {
 
   try {
     const res = await fetch(
-      `https://api.open-meteo.com/v1/forecast?latitude=${loc.lat}&longitude=${loc.lon}&current=temperature_2m,apparent_temperature,wind_speed_10m&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max&timezone=auto&forecast_days=1`
+      `https://api.open-meteo.com/v1/forecast?latitude=${loc.lat}&longitude=${loc.lon}` +
+        `&current=temperature_2m,apparent_temperature,wind_speed_10m,weather_code` +
+        `&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max` +
+        `&timezone=auto&forecast_days=2`
     );
     const d = await res.json();
     const data = {
       city: loc.n,
       pr: loc.pr,
+      code: d.current.weather_code,
       temp: d.current.temperature_2m,
       feels_like: d.current.apparent_temperature,
       wind: d.current.wind_speed_10m,
       max_today: d.daily.temperature_2m_max[0],
       min_today: d.daily.temperature_2m_min[0],
-      rain_chance: d.daily.precipitation_probability_max[0]
+      rain_chance: d.daily.precipitation_probability_max[0],
+      tomorrow: {
+        code: d.daily.weather_code[1],
+        max: d.daily.temperature_2m_max[1],
+        min: d.daily.temperature_2m_min[1],
+        rain_chance: d.daily.precipitation_probability_max[1]
+      }
     };
     WEATHER_CACHE[key] = { data, ts: Date.now() };
     return data;
@@ -269,13 +327,6 @@ const TOOL_IMPL = {
 };
 
 // ---------- шаблоны ответов ----------
-function sign(n) {
-  const r = Math.round(n);
-  if (r > 0) return 'плюс ' + r;
-  if (r < 0) return 'минус ' + Math.abs(r);
-  return 'ноль';
-}
-
 function plural(n, one, few, many) {
   const n10 = n % 10;
   const n100 = n % 100;
@@ -288,18 +339,36 @@ function cap(s) {
   return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
+function sign(n) {
+  const r = Math.round(n);
+  if (r > 0) return 'плюс ' + r;
+  if (r < 0) return 'минус ' + Math.abs(r);
+  return 'ноль';
+}
+
 // префикс города: свой город не называем, чужой — называем
 function where(d) {
   if (!d.city || d.city === DEFAULT_CITY) return '';
   return (d.pr || 'в городе ' + d.city) + ' ';
 }
 
+function precipWord(maxTemp) {
+  return maxTemp <= 0 ? 'снег' : 'дождь';
+}
+
 function fmtWeather(d) {
-  let s = `${where(d)}сейчас ${sign(d.temp)}`;
+  let s = `${where(d)}сейчас ${describe(d.code)}, ${sign(d.temp)}`;
   if (Math.abs(d.temp - d.feels_like) >= 3) s += `, ощущается как ${sign(d.feels_like)}`;
   s += `. Днём до ${sign(d.max_today)}.`;
-  if (d.rain_chance >= 50) s += ' Возможен дождь, лучше взять зонт.';
+  if (d.rain_chance > 70) s += ` Скорее всего будет ${precipWord(d.max_today)}.`;
   if (d.wind >= 30) s += ' И сильный ветер.';
+  return cap(s);
+}
+
+function fmtWeatherTomorrow(d) {
+  const t = d.tomorrow;
+  let s = `${where(d)}завтра ${describe(t.code)}, от ${sign(t.min)} до ${sign(t.max)}.`;
+  if (t.rain_chance > 70) s += ` Скорее всего будет ${precipWord(t.max)}.`;
   return cap(s);
 }
 
@@ -328,12 +397,15 @@ const FAST_FMT = {
 };
 
 // ---------- ПРЕ-РОУТЕР: ответ вообще без вызова модели ----------
+const REPEAT_RE = /(повтор|ещ раз|что ты сказа|не расслыш|не понял что ты)/;
+
 const TIME_RE = /(скольк( сейчас)? времен|котор( сейчас)? час|скольк на час|как сейчас времен|точн время)/;
 const DATE_RE = /(как сегодн числ|как сегодн ден|как ден недел|как( сегодн)? дат|как числ сегодн)/;
 const TIME_BLOCK_RE = /(нужн|надо|займ|потреб|уйдет|остал|прошл|чтоб|через|назад|заня)/;
 
-const WEATHER_RE = /(погод|скольк градус|как температур|тепл л|холодн л|дожд|зонт|снег)/;
-const WEATHER_BLOCK_RE = /(почем|объясн|сравн|завтр|послезавтр|вчер|недел|выходн|через|был|мес|прогноз на)/;
+const WEATHER_RE = /(погод|скольк градус|как температур|тепл л|холодн л|дожд|зонт|снег|пасмурн|солнечн)/;
+const WEATHER_BLOCK_RE = /(почем|объясн|сравн|послезавтр|вчер|недел|выходн|через|был|мес|прогноз на)/;
+const TOMORROW_RE = /(^| )завтр/;
 
 const RATE_RE = /(курс|скольк сто|почем доллар|почем евр|почем биткоин)/;
 const RATE_BLOCK_RE = /(вчер|был|будет|прогноз|почем упа|почем рос|через|прошл|динамик)/;
@@ -355,51 +427,88 @@ const CURRENCY_MAP = [
   [/дирхам|aed/, 'AED']
 ];
 
-async function preRoute(rawText, nluTokens) {
+function currencyFrom(stemmed) {
+  for (const [re, c] of CURRENCY_MAP) {
+    if (re.test(stemmed)) return c;
+  }
+  return null;
+}
+
+async function preRoute(rawText, nluTokens, ctx) {
   const plain = norm(rawText);
   if (!plain || plain.length > 80) return null;
 
   const tokens = (nluTokens && nluTokens.length ? nluTokens.map(norm) : plain.split(' ')).filter(Boolean);
   const stemmed = tokens.map(stem).join(' ');
+  const cityHere = cityFromTokens(tokens);
+
+  // «повтори»
+  if (REPEAT_RE.test(stemmed) && ctx.last) {
+    console.log('PRE: repeat');
+    return { answer: ctx.last, intent: ctx.intent, city: ctx.city };
+  }
 
   // время
   if (TIME_RE.test(stemmed) && !TIME_BLOCK_RE.test(stemmed)) {
-    const loc = cityFromTokens(tokens) || CITY_INDEX[stemPhrase(DEFAULT_CITY)];
+    const loc = cityHere || HOME;
     console.log('PRE: time', loc.n);
-    return fmtTime(timeByLoc(loc));
+    return { answer: fmtTime(timeByLoc(loc)), intent: 'time', city: loc.n };
   }
 
   // дата и день недели
   if (DATE_RE.test(stemmed) && !TIME_BLOCK_RE.test(stemmed)) {
-    const loc = cityFromTokens(tokens) || CITY_INDEX[stemPhrase(DEFAULT_CITY)];
+    const loc = cityHere || HOME;
     console.log('PRE: date', loc.n);
-    return fmtDate(timeByLoc(loc));
+    return { answer: fmtDate(timeByLoc(loc)), intent: 'date', city: loc.n };
   }
 
-  // погода
+  // погода: сегодня и завтра
   if (WEATHER_RE.test(stemmed) && !WEATHER_BLOCK_RE.test(stemmed)) {
-    const loc = cityFromTokens(tokens) || CITY_INDEX[stemPhrase(DEFAULT_CITY)];
+    const loc = cityHere || (ctx.city ? CITY_INDEX[stemPhrase(ctx.city)] : null) || HOME;
     const d = await weatherByLoc(loc);
     if (!d.error) {
-      console.log('PRE: weather', loc.n);
-      return fmtWeather(d);
+      const tomorrow = TOMORROW_RE.test(stemmed);
+      console.log('PRE: weather', loc.n, tomorrow ? 'завтра' : 'сегодня');
+      return {
+        answer: tomorrow ? fmtWeatherTomorrow(d) : fmtWeather(d),
+        intent: tomorrow ? 'weather_tomorrow' : 'weather',
+        city: loc.n
+      };
     }
   }
 
   // курсы
   if (RATE_RE.test(stemmed) && !RATE_BLOCK_RE.test(stemmed)) {
-    let code = null;
-    for (const [re, c] of CURRENCY_MAP) {
-      if (re.test(stemmed)) {
-        code = c;
-        break;
-      }
-    }
+    const code = currencyFrom(stemmed);
     if (code) {
       const d = await getRate({ code });
       if (!d.error) {
         console.log('PRE: rate', code);
-        return fmtRate(d);
+        return { answer: fmtRate(d), intent: 'rate', city: ctx.city };
+      }
+    }
+  }
+
+  // короткое уточнение: «а в москве?» — повторяем прошлый интент для нового города
+  if (cityHere && tokens.length <= 3 && ctx.intent) {
+    if (ctx.intent === 'time' || ctx.intent === 'date') {
+      console.log('PRE: follow-up', ctx.intent, cityHere.n);
+      const t = timeByLoc(cityHere);
+      return {
+        answer: ctx.intent === 'time' ? fmtTime(t) : fmtDate(t),
+        intent: ctx.intent,
+        city: cityHere.n
+      };
+    }
+    if (ctx.intent === 'weather' || ctx.intent === 'weather_tomorrow') {
+      const d = await weatherByLoc(cityHere);
+      if (!d.error) {
+        console.log('PRE: follow-up', ctx.intent, cityHere.n);
+        return {
+          answer: ctx.intent === 'weather_tomorrow' ? fmtWeatherTomorrow(d) : fmtWeather(d),
+          intent: ctx.intent,
+          city: cityHere.n
+        };
       }
     }
   }
@@ -568,7 +677,7 @@ async function askAI(contents, mode) {
 async function warmup() {
   try {
     await Promise.all([
-      weatherByLoc(CITY_INDEX[stemPhrase(DEFAULT_CITY)]),
+      weatherByLoc(HOME),
       weatherByLoc(CITY_INDEX[stemPhrase('Москва')]),
       getRate({ code: 'USD' })
     ]);
@@ -592,9 +701,11 @@ module.exports = async function handler(req, res) {
   const isNew = body.session.new;
 
   if (isNew || !sessions[sessionId]) sessions[sessionId] = [];
+  if (isNew || !ctxStore[sessionId]) ctxStore[sessionId] = {};
 
   if (isNew) {
-    return res.status(200).json(respond('Привет! Спроси меня что-нибудь.', body));
+    const hello = GREETINGS[Math.floor(Math.random() * GREETINGS.length)];
+    return res.status(200).json(respond(hello, body));
   }
 
   if (sessions[sessionId].length > 10) {
@@ -603,12 +714,17 @@ module.exports = async function handler(req, res) {
 
   sessions[sessionId].push({ role: 'user', parts: [{ text: userText }] });
 
+  const ctx = ctxStore[sessionId];
+
   // пре-роутер: если попали в шаблон — модель не трогаем вообще
   try {
-    const quick = await preRoute(userText, nluTokens);
+    const quick = await preRoute(userText, nluTokens, ctx);
     if (quick) {
-      sessions[sessionId].push({ role: 'model', parts: [{ text: quick }] });
-      return res.status(200).json(respond(quick, body));
+      ctx.intent = quick.intent;
+      ctx.city = quick.city;
+      ctx.last = quick.answer;
+      sessions[sessionId].push({ role: 'model', parts: [{ text: quick.answer }] });
+      return res.status(200).json(respond(quick.answer, body));
     }
   } catch (e) {
     console.error('PRE ERROR:', e.message);
@@ -619,15 +735,28 @@ module.exports = async function handler(req, res) {
 
   let answer;
   try {
-    const result = await askAI(sessions[sessionId], mode);
-    answer = result.answer || 'Не понял вопрос, попробуй ещё раз.';
-    sessions[sessionId] = result.history;
+    const result = await Promise.race([
+      askAI(sessions[sessionId], mode),
+      new Promise((resolve) => setTimeout(() => resolve(null), ANSWER_TIMEOUT))
+    ]);
+
+    if (result) {
+      answer = result.answer || 'Не понял вопрос, попробуй ещё раз.';
+      sessions[sessionId] = result.history;
+    } else {
+      console.error('TIMEOUT после', ANSWER_TIMEOUT, 'мс');
+      answer = 'Что-то я задумался. Спроси ещё раз.';
+    }
   } catch (e) {
     console.error('AI ERROR:', e.message);
     answer = 'Извини, что-то пошло не так, попробуй ещё раз.';
   }
 
   if (answer.length > 1000) answer = answer.slice(0, 1000);
+
+  ctx.intent = null;
+  ctx.city = null;
+  ctx.last = answer;
 
   return res.status(200).json(respond(answer, body));
 };
