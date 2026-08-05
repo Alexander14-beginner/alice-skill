@@ -19,7 +19,7 @@ const HARD_RE = /посчитай|сколько будет|сколько .{0,2
 function pickMode(text) {
   const hard = HARD_RE.test(text) || text.length > 70;
   return hard
-    ? { model: MODEL_SMART, tokens: 600 }
+    ? { model: MODEL_SMART, tokens: 400 }
     : { model: MODEL_FAST, tokens: 300 };
 }
 
