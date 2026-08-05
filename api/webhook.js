@@ -286,6 +286,7 @@ async function askAI(contents, mode) {
 }
 
 module.exports = async function handler(req, res) {
+  if (req.method === 'GET') return res.status(200).send('ok');
   if (req.method !== 'POST') return res.status(405).send('Method not allowed');
 
   const body = req.body;
