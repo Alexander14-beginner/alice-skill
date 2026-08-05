@@ -4,7 +4,7 @@ const GEMINI_KEY = process.env.GEMINI_KEY;
 const TAVILY_KEY = process.env.TAVILY_KEY;
 
 const MODEL_FAST = 'gemini-3.5-flash-lite';
-const MODEL_SMART = 'gemini-3.6-flash';
+const MODEL_SMART = 'gemini-3.5-flash-lite';
 
 const CITY_ALIASES = {
   'мск': 'Москва', 'москва': 'Москва',
@@ -13,7 +13,6 @@ const CITY_ALIASES = {
   'кзн': 'Казань', 'ростов': 'Ростов-на-Дону', 'влад': 'Владивосток'
 };
 
-// вопросы, требующие рассуждения → умная модель и больше токенов
 const HARD_RE = /посчитай|сколько будет|сколько .{0,20}(можно|получится|выйдет)|почему|объясни|сравни|стоит ли|что выгоднее|в чём разница|в чем разница|как работает|придумай|расскажи про|что думаешь|как считаешь|убеди/i;
 
 function pickMode(text) {
@@ -29,6 +28,7 @@ const SYSTEM_PROMPT =
   'Можно лёгкая ирония и своё мнение. Без списков, markdown, эмодзи и скобок — в речи это звучит мусором. Без мата и 18+ тем. ' +
   'ВАЖНО: никогда не называй цифры (курсы, цены, статистику) по памяти — только из результатов инструментов. ' +
   'Для курсов валют и криптовалют вызывай get_rate. Для новостей, цен, событий и свежих фактов вызывай web_search. ' +
+  'Названия технологий пиши так, как их произносят разработчики: Flask — флэск, Django — джанго, SQL — эс-ку-эль, FastAPI — фаст эй пи ай. Не переводи названия на русский. ' +
   'При вычислениях с дробями посчитай по шагам про себя и проверь порядок величины обратным умножением, вслух скажи только результат. ' +
   'Если инструмент вернул ошибку — честно скажи, что не смог узнать, но не выдумывай данные.';
 
@@ -120,7 +120,7 @@ async function getWeather({ city }) {
 
   try {
     const res = await fetch(
-      `https://api.open-meteo.com/v1/forecast?latitude=${loc.latitude}&longitude=${loc.longitude}&current=temperature_2m,apparent_temperature,wind_speed_10m,weather_code&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max&timezone=auto&forecast_days=1`
+      `https://api.open-meteo.com/v1/forecast?latitude=${loc.latitude}&longitude=${loc.longitude}&current=temperature_2m,apparent_temperature,wind_speed_10m&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max&timezone=auto&forecast_days=1`
     );
     const d = await res.json();
     return {
@@ -193,7 +193,7 @@ async function webSearch({ query }) {
       body: JSON.stringify({
         api_key: TAVILY_KEY,
         query,
-        max_results: 4,
+        max_results: 3,
         search_depth: 'basic',
         include_answer: true
       })
@@ -208,7 +208,7 @@ async function webSearch({ query }) {
     return {
       results: data.results.map((r) => ({
         title: r.title,
-        content: (r.content || '').slice(0, 600)
+        content: (r.content || '').slice(0, 500)
       }))
     };
   } catch (e) {
@@ -222,6 +222,38 @@ const TOOL_IMPL = {
   get_time: getTime,
   get_rate: getRate,
   web_search: webSearch
+};
+
+// ---------- быстрые шаблоны: ответ без второго вызова модели ----------
+function sign(n) {
+  const r = Math.round(n);
+  if (r > 0) return 'плюс ' + r;
+  if (r < 0) return 'минус ' + Math.abs(r);
+  return 'ноль';
+}
+
+function fmtWeather(d) {
+  let s = `В городе ${d.city} сейчас ${sign(d.temp)}, ощущается как ${sign(d.feels_like)}. `;
+  s += `Ветер ${Math.round(d.wind)} километров в час, днём от ${sign(d.min_today)} до ${sign(d.max_today)}.`;
+  if (d.rain_chance >= 40) s += ` Вероятность осадков ${d.rain_chance} процентов, лучше взять зонт.`;
+  return s;
+}
+
+function fmtTime(d) {
+  return `В городе ${d.city} сейчас ${d.current_time}.`;
+}
+
+function fmtRate(d) {
+  if (d.usd) {
+    return `${d.currency} стоит около ${Math.round(d.usd)} долларов, это примерно ${Math.round(d.rub)} рублей.`;
+  }
+  return `Курс ${d.currency} — ${d.rub} рублей по данным ЦБ на ${d.date}.`;
+}
+
+const FAST_FMT = {
+  get_weather: fmtWeather,
+  get_time: fmtTime,
+  get_rate: fmtRate
 };
 
 async function callGemini(contents, mode) {
@@ -274,11 +306,25 @@ async function askAI(contents, mode) {
           console.error('TOOL ERROR:', e.message);
           result = { error: 'Ошибка выполнения' };
         }
-        return { functionResponse: { name, response: result } };
+        return { name, result, functionResponse: { name, response: result } };
       })
     );
 
-    history.push({ role: 'user', parts: responses });
+    // быстрый путь: один простой инструмент без ошибки → отвечаем шаблоном
+    if (round === 0 && responses.length === 1) {
+      const r = responses[0];
+      const fmt = FAST_FMT[r.name];
+      if (fmt && !r.result.error) {
+        console.log('FAST PATH:', r.name);
+        history.push({ role: 'user', parts: [{ functionResponse: r.functionResponse }] });
+        return { answer: fmt(r.result), history };
+      }
+    }
+
+    history.push({
+      role: 'user',
+      parts: responses.map((r) => ({ functionResponse: r.functionResponse }))
+    });
   }
 
   const final = await callGemini(history, mode);
