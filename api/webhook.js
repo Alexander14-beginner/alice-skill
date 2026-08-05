@@ -1,12 +1,13 @@
 const sessions = {};
 const ctxStore = {};
 
-const ANYMODEL_KEY = process.env.ANYMODEL_KEY;
+const GEMINI_KEY = process.env.GEMINI_KEY;
+const AITUNNEL_KEY = process.env.AITUNNEL_KEY;
 const TAVILY_KEY = process.env.TAVILY_KEY;
 
-const ANYMODEL_URL = 'https://anymodel.org/v1/chat/completions';
-const MODEL_FAST = 'claude-haiku-4-5-20251001';
-const MODEL_SMART = 'claude-haiku-4-5-20251001';
+const GEMINI_MODEL = 'gemini-3.5-flash-lite';
+const HAIKU_MODEL = 'claude-haiku-4.5';
+const AITUNNEL_URL = 'https://api.aitunnel.ru/v1/chat/completions';
 
 const DEFAULT_CITY = 'Санкт-Петербург';
 const ANSWER_TIMEOUT = 4500;
@@ -19,7 +20,7 @@ const GREETINGS = [
   'Привет! О чём поговорим?'
 ];
 
-// ---------- таблица городов ----------
+// ---------- таблица городов: координаты и таймзона без обращения к сети ----------
 const CITY_TABLE = [
   { n: 'Москва', lat: 55.7558, lon: 37.6173, tz: 'Europe/Moscow', pr: 'в Москве', alt: ['мск'] },
   { n: 'Санкт-Петербург', lat: 59.9343, lon: 30.3351, tz: 'Europe/Moscow', pr: 'в Санкт-Петербурге', alt: ['спб', 'питер', 'петербург', 'ленинград'] },
@@ -48,7 +49,7 @@ const CITY_TABLE = [
   { n: 'Ярославль', lat: 57.6261, lon: 39.8845, tz: 'Europe/Moscow', pr: 'в Ярославле', alt: [] },
   { n: 'Томск', lat: 56.4846, lon: 84.9476, tz: 'Asia/Tomsk', pr: 'в Томске', alt: [] },
   { n: 'Оренбург', lat: 51.7727, lon: 55.0988, tz: 'Asia/Yekaterinburg', pr: 'в Оренбурге', alt: [] },
-  { n: 'Кемерово', lat: 55.3547, lon: 86.0873, tz: 'Asia/Novokuznetsk', pr: 'в Кемерове', alt: [] },
+  { n: 'Кемерово', lat: 55.3547, lon: 86.0873, tz: 'Asia/Novokuznetsk', pr: 'в Кемерово', alt: [] },
   { n: 'Сочи', lat: 43.5855, lon: 39.7231, tz: 'Europe/Moscow', pr: 'в Сочи', alt: [] },
   { n: 'Калининград', lat: 54.7104, lon: 20.4522, tz: 'Europe/Kaliningrad', pr: 'в Калининграде', alt: [] },
   { n: 'Мурманск', lat: 68.9585, lon: 33.0827, tz: 'Europe/Moscow', pr: 'в Мурманске', alt: [] },
@@ -625,9 +626,6 @@ const FAST_FMT = {
 };
 
 // ---------- пре-роутер ----------
-const HELLO_RE =
-  /^(привет|здравствуй|здравствуйте|хай|салют|доброе утро|добрый день|добрый вечер)$/;
-
 const REPEAT_RE =
   /(повтор|ещ раз|что ты сказа|не расслыш|не понял что ты)/;
 
@@ -704,25 +702,6 @@ async function preRoute(
 
   const cityHere = cityFromTokens(tokens);
 
-  // приветствие без модели
-  if (HELLO_RE.test(plain)) {
-    console.log('PRE: greeting');
-
-    const answer =
-      GREETINGS[
-        Math.floor(
-          Math.random() * GREETINGS.length
-        )
-      ];
-
-    return {
-      answer,
-      intent: 'greeting',
-      city: context.city
-    };
-  }
-
-  // повтор последнего ответа
   if (
     REPEAT_RE.test(stemmed) &&
     context.last
@@ -736,7 +715,6 @@ async function preRoute(
     };
   }
 
-  // время
   if (
     TIME_RE.test(stemmed) &&
     !TIME_BLOCK_RE.test(stemmed)
@@ -755,7 +733,6 @@ async function preRoute(
     };
   }
 
-  // дата
   if (
     DATE_RE.test(stemmed) &&
     !TIME_BLOCK_RE.test(stemmed)
@@ -774,7 +751,6 @@ async function preRoute(
     };
   }
 
-  // погода
   if (
     WEATHER_RE.test(stemmed) &&
     !WEATHER_BLOCK_RE.test(stemmed)
@@ -816,7 +792,6 @@ async function preRoute(
     }
   }
 
-  // курс
   if (
     RATE_RE.test(stemmed) &&
     !RATE_BLOCK_RE.test(stemmed)
@@ -841,7 +816,6 @@ async function preRoute(
     }
   }
 
-  // короткое уточнение: «а в Москве?»
   if (
     cityHere &&
     tokens.length <= 3 &&
@@ -898,44 +872,121 @@ async function preRoute(
   return null;
 }
 
-// ---------- выбор режима ----------
-const HARD_RE =
-  /посчитай|сколько будет|сколько .{0,20}(можно|получится|выйдет)|почему|объясни|сравни|стоит ли|что выгоднее|в чём разница|в чем разница|как работает|придумай|расскажи про|что думаешь|как считаешь|убеди/i;
+// ---------- выбор модели ----------
+function wantsHaiku(text) {
+  const words = norm(text)
+    .split(' ')
+    .filter(Boolean);
+
+  return words.includes('продумай');
+}
 
 function pickMode(text) {
-  const hard =
-    HARD_RE.test(text) ||
-    text.length > 70;
+  if (wantsHaiku(text)) {
+    return {
+      provider: 'haiku',
+      model: HAIKU_MODEL,
+      tokens: 400
+    };
+  }
 
-  return hard
-    ? {
-        model: MODEL_SMART,
-        tokens: 400
-      }
-    : {
-        model: MODEL_FAST,
-        tokens: 300
-      };
+  return {
+    provider: 'gemini',
+    model: GEMINI_MODEL,
+    tokens: 300
+  };
 }
 
 const SYSTEM_PROMPT =
   'Ты голосовой ассистент в умной колонке. Тебя слушают, а не читают. ' +
   'Говори живо и по-человечески, 1-3 предложения. Начинай сразу с сути: никаких "Конечно", "Отличный вопрос", "Давайте разберёмся". ' +
   'Можно лёгкая ирония и своё мнение. Без списков, markdown, эмодзи и скобок — в речи это звучит мусором. Без мата и 18+ тем. ' +
-  'Никогда не называй актуальные цифры, курсы, цены и статистику по памяти — используй инструменты. ' +
-  'Для курсов валют и криптовалют вызывай get_rate. Для новостей, цен, событий и свежих фактов вызывай web_search. ' +
+  'ВАЖНО: никогда не называй цифры, курсы, цены и статистику по памяти — только из результатов инструментов. ' +
   'Для погоды вызывай get_weather. Для времени и даты вызывай get_time. ' +
-  'Названия технологий пиши так, как их произносят разработчики: Flask — флэск, Django — джанго, SQL — эс-ку-эль, FastAPI — фаст эй пи ай. ' +
-  'При вычислениях посчитай и проверь результат про себя, вслух скажи только ответ. ' +
+  'Для курсов валют и криптовалют вызывай get_rate. Для новостей, цен, событий и свежих фактов вызывай web_search. ' +
+  'Названия технологий пиши так, как их произносят разработчики: Flask — флэск, Django — джанго, SQL — эс-ку-эль, FastAPI — фаст эй пи ай. Не переводи названия на русский. ' +
+  'При вычислениях с дробями посчитай по шагам про себя и проверь порядок величины обратным умножением, вслух скажи только результат. ' +
   'Если инструмент вернул ошибку — честно скажи, что не смог узнать, но не выдумывай данные.';
 
-const TOOLS = [
+// ---------- инструменты Gemini ----------
+const GEMINI_TOOLS = [
+  {
+    functionDeclarations: [
+      {
+        name: 'get_weather',
+        description: 'Актуальная погода в городе.',
+        parameters: {
+          type: 'OBJECT',
+          properties: {
+            city: {
+              type: 'STRING',
+              description:
+                'Город в именительном падеже, например "Москва". Всегда приводи к именительному падежу.'
+            }
+          },
+          required: ['city']
+        }
+      },
+      {
+        name: 'get_time',
+        description:
+          'Текущее время и дата в городе.',
+        parameters: {
+          type: 'OBJECT',
+          properties: {
+            city: {
+              type: 'STRING',
+              description:
+                'Город в именительном падеже. Если не указан — "Санкт-Петербург".'
+            }
+          },
+          required: ['city']
+        }
+      },
+      {
+        name: 'get_rate',
+        description:
+          'Точный курс валюты или криптовалюты. Используй всегда для вопросов про доллар, евро, биткоин и любые курсы.',
+        parameters: {
+          type: 'OBJECT',
+          properties: {
+            code: {
+              type: 'STRING',
+              description:
+                'Код валюты: USD, EUR, CNY, BTC, ETH и так далее.'
+            }
+          },
+          required: ['code']
+        }
+      },
+      {
+        name: 'web_search',
+        description:
+          'Поиск в интернете: новости, события, цены товаров, факты о компаниях, спорт, всё что могло измениться.',
+        parameters: {
+          type: 'OBJECT',
+          properties: {
+            query: {
+              type: 'STRING',
+              description:
+                'Конкретный поисковый запрос. Формулируй точно, не общими словами.'
+            }
+          },
+          required: ['query']
+        }
+      }
+    ]
+  }
+];
+
+// ---------- инструменты Claude через AITUNNEL ----------
+const OPENAI_TOOLS = [
   {
     type: 'function',
     function: {
       name: 'get_weather',
       description:
-        'Получает актуальную погоду в городе.',
+        'Актуальная погода в городе.',
       parameters: {
         type: 'object',
         properties: {
@@ -955,14 +1006,14 @@ const TOOLS = [
     function: {
       name: 'get_time',
       description:
-        'Получает текущее время и дату в городе.',
+        'Текущее время и дата в городе.',
       parameters: {
         type: 'object',
         properties: {
           city: {
             type: 'string',
             description:
-              'Город в именительном падеже. Если город не указан, передай Санкт-Петербург.'
+              'Город в именительном падеже. Если не указан — Санкт-Петербург.'
           }
         },
         required: ['city'],
@@ -975,14 +1026,14 @@ const TOOLS = [
     function: {
       name: 'get_rate',
       description:
-        'Получает точный актуальный курс валюты или криптовалюты.',
+        'Точный курс валюты или криптовалюты. Используй всегда для вопросов про любые курсы.',
       parameters: {
         type: 'object',
         properties: {
           code: {
             type: 'string',
             description:
-              'Код валюты или криптовалюты: USD, EUR, CNY, BTC, ETH и так далее.'
+              'Код валюты: USD, EUR, CNY, BTC, ETH и так далее.'
           }
         },
         required: ['code'],
@@ -995,14 +1046,14 @@ const TOOLS = [
     function: {
       name: 'web_search',
       description:
-        'Ищет в интернете свежую информацию: новости, события, цены, компании, спорт и другие изменяемые факты.',
+        'Поиск в интернете: новости, события, цены товаров, компании, спорт и всё, что могло измениться.',
       parameters: {
         type: 'object',
         properties: {
           query: {
             type: 'string',
             description:
-              'Конкретный поисковый запрос на русском языке.'
+              'Конкретный поисковый запрос.'
           }
         },
         required: ['query'],
@@ -1012,6 +1063,254 @@ const TOOLS = [
   }
 ];
 
+function trimSession(history) {
+  if (history.length <= 10) {
+    return history;
+  }
+
+  return history.slice(-10);
+}
+
+function toGeminiContents(history) {
+  return history.map((message) => ({
+    role:
+      message.role === 'assistant'
+        ? 'model'
+        : 'user',
+    parts: [
+      {
+        text: message.content
+      }
+    ]
+  }));
+}
+
+async function runTool(name, args) {
+  const implementation =
+    TOOL_IMPL[name];
+
+  console.log(
+    'TOOL:',
+    name,
+    JSON.stringify(args || {})
+  );
+
+  try {
+    return implementation
+      ? await implementation(args || {})
+      : {
+          error:
+            'Неизвестный инструмент'
+        };
+  } catch (error) {
+    console.error(
+      'TOOL ERROR:',
+      error.message
+    );
+
+    return {
+      error:
+        'Ошибка выполнения'
+    };
+  }
+}
+
+// ---------- Gemini 3.5 Flash-Lite ----------
+async function callGemini(
+  contents,
+  mode
+) {
+  if (!GEMINI_KEY) {
+    throw new Error(
+      'Не задан GEMINI_KEY'
+    );
+  }
+
+  const started = Date.now();
+
+  const response = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${mode.model}:generateContent?key=${GEMINI_KEY}`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type':
+          'application/json'
+      },
+      body: JSON.stringify({
+        contents,
+        tools: GEMINI_TOOLS,
+        systemInstruction: {
+          parts: [
+            {
+              text: SYSTEM_PROMPT
+            }
+          ]
+        },
+        generationConfig: {
+          maxOutputTokens:
+            mode.tokens,
+          temperature: 0.9
+        }
+      })
+    }
+  );
+
+  const rawText =
+    await response.text();
+
+  let data;
+
+  try {
+    data = JSON.parse(rawText);
+  } catch (error) {
+    throw new Error(
+      'Gemini вернул не JSON: ' +
+      rawText.slice(0, 200)
+    );
+  }
+
+  console.log(
+    'GEMINI:',
+    mode.model,
+    response.status,
+    `${Date.now() - started}ms`,
+    JSON.stringify(data).slice(0, 400)
+  );
+
+  if (
+    !response.ok ||
+    data.error
+  ) {
+    throw new Error(
+      'Gemini API error: ' +
+      JSON.stringify(
+        data.error || data
+      ).slice(0, 250)
+    );
+  }
+
+  if (
+    !data.candidates ||
+    !data.candidates.length
+  ) {
+    throw new Error(
+      'Gemini не вернул candidates'
+    );
+  }
+
+  return data.candidates[0].content;
+}
+
+function textFromGemini(content) {
+  return (content.parts || [])
+    .map((part) => part.text || '')
+    .join(' ')
+    .trim();
+}
+
+async function askGemini(
+  messages,
+  mode
+) {
+  const history =
+    toGeminiContents(messages);
+
+  for (
+    let round = 0;
+    round < 2;
+    round++
+  ) {
+    const content =
+      await callGemini(
+        history,
+        mode
+      );
+
+    history.push(content);
+
+    const calls =
+      (content.parts || [])
+        .filter(
+          (part) =>
+            part.functionCall
+        );
+
+    if (!calls.length) {
+      return textFromGemini(content);
+    }
+
+    const responses =
+      await Promise.all(
+        calls.map(async (part) => {
+          const {
+            name,
+            args
+          } = part.functionCall;
+
+          const result =
+            await runTool(
+              name,
+              args
+            );
+
+          return {
+            name,
+            result,
+            functionResponse: {
+              name,
+              response: result
+            }
+          };
+        })
+      );
+
+    if (
+      round === 0 &&
+      responses.length === 1
+    ) {
+      const item = responses[0];
+      const formatter =
+        FAST_FMT[item.name];
+
+      if (
+        formatter &&
+        !item.result.error
+      ) {
+        console.log(
+          'FAST PATH: GEMINI',
+          item.name
+        );
+
+        return formatter(
+          item.result
+        );
+      }
+    }
+
+    history.push({
+      role: 'user',
+      parts: responses.map(
+        (item) => ({
+          functionResponse:
+            item.functionResponse
+        })
+      )
+    });
+  }
+
+  const final =
+    await callGemini(
+      history,
+      mode
+    );
+
+  return (
+    textFromGemini(final) ||
+    'Не смог разобраться.'
+  );
+}
+
+// ---------- Claude Haiku 4.5 через AITUNNEL ----------
 function safeJsonParse(value) {
   if (!value) {
     return {};
@@ -1026,7 +1325,6 @@ function safeJsonParse(value) {
   } catch (error) {
     console.error(
       'TOOL ARGS JSON ERROR:',
-      error.message,
       String(value).slice(0, 200)
     );
 
@@ -1034,43 +1332,27 @@ function safeJsonParse(value) {
   }
 }
 
-function trimHistory(history) {
-  if (history.length <= 18) {
-    return history;
-  }
-
-  const trimmed = history.slice(-18);
-
-  while (
-    trimmed.length &&
-    trimmed[0].role !== 'user'
-  ) {
-    trimmed.shift();
-  }
-
-  return trimmed;
-}
-
-async function callAnyModel(
-  history,
+async function callAITunnel(
+  messages,
   mode
 ) {
-  if (!ANYMODEL_KEY) {
+  if (!AITUNNEL_KEY) {
     throw new Error(
-      'Не задан ANYMODEL_KEY'
+      'Не задан AITUNNEL_KEY'
     );
   }
 
   const started = Date.now();
 
   const response = await fetch(
-    ANYMODEL_URL,
+    AITUNNEL_URL,
     {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/json',
+        'Content-Type':
+          'application/json',
         Authorization:
-          `Bearer ${ANYMODEL_KEY}`
+          `Bearer ${AITUNNEL_KEY}`
       },
       body: JSON.stringify({
         model: mode.model,
@@ -1079,9 +1361,9 @@ async function callAnyModel(
             role: 'system',
             content: SYSTEM_PROMPT
           },
-          ...history
+          ...messages
         ],
-        tools: TOOLS,
+        tools: OPENAI_TOOLS,
         tool_choice: 'auto',
         max_tokens: mode.tokens,
         temperature: 0.7
@@ -1089,7 +1371,8 @@ async function callAnyModel(
     }
   );
 
-  const rawText = await response.text();
+  const rawText =
+    await response.text();
 
   let data;
 
@@ -1097,25 +1380,28 @@ async function callAnyModel(
     data = JSON.parse(rawText);
   } catch (error) {
     throw new Error(
-      'ANYMODEL вернул не JSON: ' +
+      'AITUNNEL вернул не JSON: ' +
       rawText.slice(0, 200)
     );
   }
 
   console.log(
-    'ANYMODEL:',
+    'AITUNNEL:',
     mode.model,
     response.status,
     `${Date.now() - started}ms`,
     JSON.stringify(data).slice(0, 400)
   );
 
-  if (!response.ok || data.error) {
+  if (
+    !response.ok ||
+    data.error
+  ) {
     throw new Error(
-      'ANYMODEL API error: ' +
+      'AITUNNEL API error: ' +
       JSON.stringify(
         data.error || data
-      ).slice(0, 300)
+      ).slice(0, 250)
     );
   }
 
@@ -1126,14 +1412,14 @@ async function callAnyModel(
 
   if (!message) {
     throw new Error(
-      'ANYMODEL не вернул choices[0].message'
+      'AITUNNEL не вернул choices[0].message'
     );
   }
 
   return message;
 }
 
-function textFrom(message) {
+function textFromOpenAI(message) {
   if (!message) {
     return '';
   }
@@ -1171,12 +1457,15 @@ function textFrom(message) {
   return '';
 }
 
-async function askAI(
+async function askHaiku(
   messages,
   mode
 ) {
-  let history =
-    trimHistory([...messages]);
+  const history =
+    messages.map((message) => ({
+      role: message.role,
+      content: message.content
+    }));
 
   for (
     let round = 0;
@@ -1184,38 +1473,29 @@ async function askAI(
     round++
   ) {
     const message =
-      await callAnyModel(
+      await callAITunnel(
         history,
         mode
       );
 
-    const assistantMessage = {
-      role: 'assistant',
-      content:
-        message.content || null
-    };
-
-    if (
-      Array.isArray(message.tool_calls) &&
-      message.tool_calls.length
-    ) {
-      assistantMessage.tool_calls =
-        message.tool_calls;
-    }
-
-    history.push(assistantMessage);
-
     const calls =
-      Array.isArray(message.tool_calls)
+      Array.isArray(
+        message.tool_calls
+      )
         ? message.tool_calls
         : [];
 
     if (!calls.length) {
-      return {
-        answer: textFrom(message),
-        history: trimHistory(history)
-      };
+      return textFromOpenAI(message);
     }
+
+    history.push({
+      role: 'assistant',
+      content:
+        textFromOpenAI(message) ||
+        null,
+      tool_calls: calls
+    });
 
     const responses =
       await Promise.all(
@@ -1230,38 +1510,14 @@ async function askAI(
               call.function.arguments
             );
 
-          const implementation =
-            TOOL_IMPL[name];
-
-          console.log(
-            'TOOL:',
-            name,
-            JSON.stringify(args)
-          );
-
-          let result;
-
-          try {
-            result = implementation
-              ? await implementation(args)
-              : {
-                  error:
-                    'Неизвестный инструмент'
-                };
-          } catch (error) {
-            console.error(
-              'TOOL ERROR:',
-              error.message
+          const result =
+            await runTool(
+              name,
+              args
             );
 
-            result = {
-              error:
-                'Ошибка выполнения'
-            };
-          }
-
           return {
-            id: call.id,
+            call,
             name,
             result
           };
@@ -1271,9 +1527,12 @@ async function askAI(
     for (const item of responses) {
       history.push({
         role: 'tool',
-        tool_call_id: item.id,
+        tool_call_id:
+          item.call.id,
         content:
-          JSON.stringify(item.result)
+          JSON.stringify(
+            item.result
+          )
       });
     }
 
@@ -1289,49 +1548,68 @@ async function askAI(
         formatter &&
         !item.result.error
       ) {
-        const answer =
-          formatter(item.result);
-
         console.log(
-          'FAST PATH:',
+          'FAST PATH: HAIKU',
           item.name
         );
 
-        history.push({
-          role: 'assistant',
-          content: answer
-        });
-
-        return {
-          answer,
-          history: trimHistory(history)
-        };
+        return formatter(
+          item.result
+        );
       }
     }
   }
 
-  const finalMessage =
-    await callAnyModel(
+  const final =
+    await callAITunnel(
       history,
       mode
     );
 
-  const answer =
-    textFrom(finalMessage) ||
-    'Не смог разобраться.';
-
-  history.push({
-    role: 'assistant',
-    content: answer
-  });
-
-  return {
-    answer,
-    history: trimHistory(history)
-  };
+  return (
+    textFromOpenAI(final) ||
+    'Не смог разобраться.'
+  );
 }
 
-// ---------- прогрев ----------
+async function askSelected(
+  messages,
+  mode
+) {
+  if (mode.provider === 'haiku') {
+    try {
+      return await askHaiku(
+        messages,
+        mode
+      );
+    } catch (error) {
+      console.error(
+        'HAIKU ERROR:',
+        error.message
+      );
+
+      console.log(
+        'FALLBACK: HAIKU → GEMINI'
+      );
+
+      return await askGemini(
+        messages,
+        {
+          provider: 'gemini',
+          model: GEMINI_MODEL,
+          tokens: 300
+        }
+      );
+    }
+  }
+
+  return await askGemini(
+    messages,
+    mode
+  );
+}
+
+// ---------- прогрев кэшей ----------
 async function warmup() {
   try {
     await Promise.all([
@@ -1406,11 +1684,7 @@ module.exports =
       ctxStore[sessionId] = {};
     }
 
-    // Если навык запустили без вопроса
-    if (
-      isNew &&
-      !userText.trim()
-    ) {
+    if (isNew) {
       const greeting =
         GREETINGS[
           Math.floor(
@@ -1427,7 +1701,7 @@ module.exports =
     }
 
     sessions[sessionId] =
-      trimHistory(
+      trimSession(
         sessions[sessionId]
       );
 
@@ -1439,55 +1713,61 @@ module.exports =
     const context =
       ctxStore[sessionId];
 
-    // Сначала пробуем ответить без модели
-    try {
-      const quick =
-        await preRoute(
-          userText,
-          nluTokens,
-          context
-        );
-
-      if (quick) {
-        context.intent =
-          quick.intent;
-
-        context.city =
-          quick.city;
-
-        context.last =
-          quick.answer;
-
-        sessions[sessionId].push({
-          role: 'assistant',
-          content: quick.answer
-        });
-
-        return res
-          .status(200)
-          .json(
-            respond(
-              quick.answer,
-              body
-            )
-          );
-      }
-    } catch (error) {
-      console.error(
-        'PRE ERROR:',
-        error.message
-      );
-    }
-
     const mode =
       pickMode(userText);
 
+    // Слово «продумай» всегда направляет запрос в Haiku.
+    // Остальные запросы сначала проверяются локально.
+    if (
+      mode.provider !== 'haiku'
+    ) {
+      try {
+        const quick =
+          await preRoute(
+            userText,
+            nluTokens,
+            context
+          );
+
+        if (quick) {
+          context.intent =
+            quick.intent;
+
+          context.city =
+            quick.city;
+
+          context.last =
+            quick.answer;
+
+          sessions[sessionId].push({
+            role: 'assistant',
+            content: quick.answer
+          });
+
+          return res
+            .status(200)
+            .json(
+              respond(
+                quick.answer,
+                body
+              )
+            );
+        }
+      } catch (error) {
+        console.error(
+          'PRE ERROR:',
+          error.message
+        );
+      }
+    }
+
     console.log(
-      'MODE:',
+      'ROUTE:',
+      mode.provider.toUpperCase(),
       mode.model,
       mode.tokens,
       '|',
-      userText.slice(0, 60)
+      userText.slice(0, 80)
     );
 
     let answer;
@@ -1495,7 +1775,7 @@ module.exports =
     try {
       const result =
         await Promise.race([
-          askAI(
+          askSelected(
             sessions[sessionId],
             mode
           ),
@@ -1509,11 +1789,8 @@ module.exports =
 
       if (result) {
         answer =
-          result.answer ||
+          result ||
           'Не понял вопрос, попробуй ещё раз.';
-
-        sessions[sessionId] =
-          result.history;
       } else {
         console.error(
           'TIMEOUT после',
@@ -1538,6 +1815,16 @@ module.exports =
       answer =
         answer.slice(0, 1000);
     }
+
+    sessions[sessionId].push({
+      role: 'assistant',
+      content: answer
+    });
+
+    sessions[sessionId] =
+      trimSession(
+        sessions[sessionId]
+      );
 
     context.intent = null;
     context.city = null;
