@@ -1,11 +1,12 @@
 const sessions = {};
 const ctxStore = {};
 
-const GEMINI_KEY = process.env.GEMINI_KEY;
+const AITUNNEL_KEY = process.env.AITUNNEL_KEY;
 const TAVILY_KEY = process.env.TAVILY_KEY;
 
-const MODEL_FAST = 'gemini-3.5-flash-lite';
-const MODEL_SMART = 'gemini-3.5-flash-lite';
+const AITUNNEL_URL = 'https://api.aitunnel.ru/v1/chat/completions';
+const MODEL_FAST = 'claude-haiku-4-5';
+const MODEL_SMART = 'claude-haiku-4-5';
 
 const DEFAULT_CITY = 'Санкт-Петербург';
 const ANSWER_TIMEOUT = 4500;
@@ -47,7 +48,7 @@ const CITY_TABLE = [
   { n: 'Ярославль', lat: 57.6261, lon: 39.8845, tz: 'Europe/Moscow', pr: 'в Ярославле', alt: [] },
   { n: 'Томск', lat: 56.4846, lon: 84.9476, tz: 'Asia/Tomsk', pr: 'в Томске', alt: [] },
   { n: 'Оренбург', lat: 51.7727, lon: 55.0988, tz: 'Asia/Yekaterinburg', pr: 'в Оренбурге', alt: [] },
-  { n: 'Кемерово', lat: 55.3547, lon: 86.0873, tz: 'Asia/Novokuznetsk', pr: 'в Кемерово', alt: [] },
+  { n: 'Кемерово', lat: 55.3547, lon: 86.0873, tz: 'Asia/Novokuznetsk', pr: 'в Кемерове', alt: [] },
   { n: 'Сочи', lat: 43.5855, lon: 39.7231, tz: 'Europe/Moscow', pr: 'в Сочи', alt: [] },
   { n: 'Калининград', lat: 54.7104, lon: 20.4522, tz: 'Europe/Kaliningrad', pr: 'в Калининграде', alt: [] },
   { n: 'Мурманск', lat: 68.9585, lon: 33.0827, tz: 'Europe/Moscow', pr: 'в Мурманске', alt: [] },
@@ -104,20 +105,31 @@ function fresh(entry, ttl) {
 async function geoLookup(name) {
   const key = norm(name);
   if (GEO_CACHE[key]) return GEO_CACHE[key];
+
   try {
     const res = await fetch(
       `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(name)}&count=1&language=ru`
     );
+
     const data = await res.json();
+
     if (data.results && data.results.length) {
       const r = data.results[0];
-      const loc = { n: r.name, lat: r.latitude, lon: r.longitude, tz: r.timezone, pr: 'в городе ' + r.name };
+      const loc = {
+        n: r.name,
+        lat: r.latitude,
+        lon: r.longitude,
+        tz: r.timezone,
+        pr: 'в городе ' + r.name
+      };
+
       GEO_CACHE[key] = loc;
       return loc;
     }
   } catch (e) {
     console.error('GEO ERROR:', e.message);
   }
+
   return null;
 }
 
@@ -131,14 +143,20 @@ function cityFromTokens(tokens) {
   for (let i = 0; i < tokens.length; i++) {
     for (let len = 3; len >= 1; len--) {
       if (i + len > tokens.length) continue;
-      const key = tokens.slice(i, i + len).map(stem).join(' ');
+
+      const key = tokens
+        .slice(i, i + len)
+        .map(stem)
+        .join(' ');
+
       if (CITY_INDEX[key]) return CITY_INDEX[key];
     }
   }
+
   return null;
 }
 
-// ---------- погода словами (коды WMO) ----------
+// ---------- погода словами ----------
 const WMO = {
   0: 'ясно',
   1: 'малооблачно',
@@ -177,7 +195,10 @@ function describe(code) {
 // ---------- данные ----------
 async function weatherByLoc(loc) {
   const key = loc.n;
-  if (fresh(WEATHER_CACHE[key], WEATHER_TTL)) return WEATHER_CACHE[key].data;
+
+  if (fresh(WEATHER_CACHE[key], WEATHER_TTL)) {
+    return WEATHER_CACHE[key].data;
+  }
 
   try {
     const res = await fetch(
@@ -186,7 +207,9 @@ async function weatherByLoc(loc) {
         `&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max` +
         `&timezone=auto&forecast_days=2`
     );
+
     const d = await res.json();
+
     const data = {
       city: loc.n,
       pr: loc.pr,
@@ -204,17 +227,30 @@ async function weatherByLoc(loc) {
         rain_chance: d.daily.precipitation_probability_max[1]
       }
     };
-    WEATHER_CACHE[key] = { data, ts: Date.now() };
+
+    WEATHER_CACHE[key] = {
+      data,
+      ts: Date.now()
+    };
+
     return data;
   } catch (e) {
     console.error('WEATHER ERROR:', e.message);
-    return { error: 'Не удалось получить погоду' };
+    return {
+      error: 'Не удалось получить погоду'
+    };
   }
 }
 
 async function getWeather({ city }) {
   const loc = await resolveCity(city);
-  if (!loc) return { error: 'Город не найден' };
+
+  if (!loc) {
+    return {
+      error: 'Город не найден'
+    };
+  }
+
   return await weatherByLoc(loc);
 }
 
@@ -229,7 +265,10 @@ function timeByLoc(loc) {
     month: 'long'
   }).formatToParts(new Date());
 
-  const get = (t) => (parts.find((p) => p.type === t) || {}).value || '';
+  const get = (type) => {
+    return (parts.find((part) => part.type === type) || {}).value || '';
+  };
+
   const hour = parseInt(get('hour'), 10);
   const minute = parseInt(get('minute'), 10);
   const date = `${get('weekday')}, ${get('day')} ${get('month')}`;
@@ -246,52 +285,105 @@ function timeByLoc(loc) {
 
 async function getTime({ city }) {
   const loc = await resolveCity(city);
-  if (!loc || !loc.tz) return { error: 'Город не найден' };
+
+  if (!loc || !loc.tz) {
+    return {
+      error: 'Город не найден'
+    };
+  }
+
   return timeByLoc(loc);
 }
 
 async function getRate({ code }) {
   const cur = (code || '').toUpperCase();
-  if (fresh(RATE_CACHE[cur], RATE_TTL)) return RATE_CACHE[cur].data;
 
-  const CRYPTO = { BTC: 'bitcoin', ETH: 'ethereum', TON: 'the-open-network', SOL: 'solana', DOGE: 'dogecoin' };
+  if (fresh(RATE_CACHE[cur], RATE_TTL)) {
+    return RATE_CACHE[cur].data;
+  }
+
+  const CRYPTO = {
+    BTC: 'bitcoin',
+    ETH: 'ethereum',
+    TON: 'the-open-network',
+    SOL: 'solana',
+    DOGE: 'dogecoin'
+  };
 
   try {
     if (CRYPTO[cur]) {
       const res = await fetch(
         `https://api.coingecko.com/api/v3/simple/price?ids=${CRYPTO[cur]}&vs_currencies=usd,rub`
       );
+
       const d = await res.json();
       const p = d[CRYPTO[cur]];
-      if (!p) return { error: 'Курс не найден' };
-      const data = { currency: cur, usd: p.usd, rub: p.rub };
-      RATE_CACHE[cur] = { data, ts: Date.now() };
+
+      if (!p) {
+        return {
+          error: 'Курс не найден'
+        };
+      }
+
+      const data = {
+        currency: cur,
+        usd: p.usd,
+        rub: p.rub
+      };
+
+      RATE_CACHE[cur] = {
+        data,
+        ts: Date.now()
+      };
+
       return data;
     }
 
     const res = await fetch('https://www.cbr-xml-daily.ru/daily_json.js');
     const d = await res.json();
     const v = d.Valute[cur];
-    if (!v) return { error: 'Валюта не найдена' };
+
+    if (!v) {
+      return {
+        error: 'Валюта не найдена'
+      };
+    }
+
     const data = {
       currency: cur,
       rub: (v.Value / v.Nominal).toFixed(2),
       source: 'ЦБ РФ',
       date: d.Date.slice(0, 10)
     };
-    RATE_CACHE[cur] = { data, ts: Date.now() };
+
+    RATE_CACHE[cur] = {
+      data,
+      ts: Date.now()
+    };
+
     return data;
   } catch (e) {
     console.error('RATE ERROR:', e.message);
-    return { error: 'Не удалось получить курс' };
+
+    return {
+      error: 'Не удалось получить курс'
+    };
   }
 }
 
 async function webSearch({ query }) {
+  if (!TAVILY_KEY) {
+    return {
+      error: 'Не задан TAVILY_KEY'
+    };
+  }
+
   try {
     const res = await fetch('https://api.tavily.com/search', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json'
+      },
       body: JSON.stringify({
         api_key: TAVILY_KEY,
         query,
@@ -300,22 +392,40 @@ async function webSearch({ query }) {
         include_answer: true
       })
     });
+
     const data = await res.json();
-    console.log('SEARCH:', query, '→', data.results ? data.results.length : 0);
+
+    console.log(
+      'SEARCH:',
+      query,
+      '→',
+      data.results ? data.results.length : 0
+    );
 
     if (data.answer) {
-      return { summary: data.answer.slice(0, 800) };
+      return {
+        summary: data.answer.slice(0, 800)
+      };
     }
-    if (!data.results || !data.results.length) return { error: 'Ничего не найдено' };
+
+    if (!data.results || !data.results.length) {
+      return {
+        error: 'Ничего не найдено'
+      };
+    }
+
     return {
-      results: data.results.map((r) => ({
-        title: r.title,
-        content: (r.content || '').slice(0, 500)
+      results: data.results.map((result) => ({
+        title: result.title,
+        content: (result.content || '').slice(0, 500)
       }))
     };
   } catch (e) {
     console.error('SEARCH ERROR:', e.message);
-    return { error: 'Поиск недоступен' };
+
+    return {
+      error: 'Поиск недоступен'
+    };
   }
 }
 
@@ -330,8 +440,17 @@ const TOOL_IMPL = {
 function plural(n, one, few, many) {
   const n10 = n % 10;
   const n100 = n % 100;
+
   if (n10 === 1 && n100 !== 11) return one;
-  if (n10 >= 2 && n10 <= 4 && (n100 < 12 || n100 > 14)) return few;
+
+  if (
+    n10 >= 2 &&
+    n10 <= 4 &&
+    (n100 < 12 || n100 > 14)
+  ) {
+    return few;
+  }
+
   return many;
 }
 
@@ -340,54 +459,99 @@ function cap(s) {
 }
 
 function sign(n) {
-  const r = Math.round(n);
-  if (r > 0) return 'плюс ' + r;
-  if (r < 0) return 'минус ' + Math.abs(r);
+  const rounded = Math.round(n);
+
+  if (rounded > 0) return 'плюс ' + rounded;
+  if (rounded < 0) return 'минус ' + Math.abs(rounded);
+
   return 'ноль';
 }
 
 // префикс города: свой город не называем, чужой — называем
-function where(d) {
-  if (!d.city || d.city === DEFAULT_CITY) return '';
-  return (d.pr || 'в городе ' + d.city) + ' ';
+function where(data) {
+  if (!data.city || data.city === DEFAULT_CITY) return '';
+
+  return (data.pr || 'в городе ' + data.city) + ' ';
 }
 
 function precipWord(maxTemp) {
   return maxTemp <= 0 ? 'снег' : 'дождь';
 }
 
-function fmtWeather(d) {
-  let s = `${where(d)}сейчас ${describe(d.code)}, ${sign(d.temp)}`;
-  if (Math.abs(d.temp - d.feels_like) >= 3) s += `, ощущается как ${sign(d.feels_like)}`;
-  s += `. Днём до ${sign(d.max_today)}.`;
-  if (d.rain_chance > 70) s += ` Скорее всего будет ${precipWord(d.max_today)}.`;
-  if (d.wind >= 30) s += ' И сильный ветер.';
-  return cap(s);
-}
+function fmtWeather(data) {
+  let text =
+    `${where(data)}сейчас ${describe(data.code)}, ` +
+    `${sign(data.temp)}`;
 
-function fmtWeatherTomorrow(d) {
-  const t = d.tomorrow;
-  let s = `${where(d)}завтра ${describe(t.code)}, от ${sign(t.min)} до ${sign(t.max)}.`;
-  if (t.rain_chance > 70) s += ` Скорее всего будет ${precipWord(t.max)}.`;
-  return cap(s);
-}
-
-function fmtTime(d) {
-  const h = `${d.hour} ${plural(d.hour, 'час', 'часа', 'часов')}`;
-  if (d.minute === 0) return cap(`${where(d)}сейчас ровно ${h}.`);
-  const m = `${d.minute} ${plural(d.minute, 'минута', 'минуты', 'минут')}`;
-  return cap(`${where(d)}сейчас ${h} ${m}.`);
-}
-
-function fmtDate(d) {
-  return cap(`${where(d)}сегодня ${d.date}.`);
-}
-
-function fmtRate(d) {
-  if (d.usd) {
-    return `${d.currency} стоит около ${Math.round(d.usd)} долларов, это примерно ${Math.round(d.rub)} рублей.`;
+  if (Math.abs(data.temp - data.feels_like) >= 3) {
+    text += `, ощущается как ${sign(data.feels_like)}`;
   }
-  return `Курс ${d.currency} — ${d.rub} рублей по данным ЦБ на ${d.date}.`;
+
+  text += `. Днём до ${sign(data.max_today)}.`;
+
+  if (data.rain_chance > 70) {
+    text += ` Скорее всего будет ${precipWord(data.max_today)}.`;
+  }
+
+  if (data.wind >= 30) {
+    text += ' И сильный ветер.';
+  }
+
+  return cap(text);
+}
+
+function fmtWeatherTomorrow(data) {
+  const tomorrow = data.tomorrow;
+
+  let text =
+    `${where(data)}завтра ${describe(tomorrow.code)}, ` +
+    `от ${sign(tomorrow.min)} до ${sign(tomorrow.max)}.`;
+
+  if (tomorrow.rain_chance > 70) {
+    text += ` Скорее всего будет ${precipWord(tomorrow.max)}.`;
+  }
+
+  return cap(text);
+}
+
+function fmtTime(data) {
+  const hours =
+    `${data.hour} ` +
+    plural(data.hour, 'час', 'часа', 'часов');
+
+  if (data.minute === 0) {
+    return cap(
+      `${where(data)}сейчас ровно ${hours}.`
+    );
+  }
+
+  const minutes =
+    `${data.minute} ` +
+    plural(data.minute, 'минута', 'минуты', 'минут');
+
+  return cap(
+    `${where(data)}сейчас ${hours} ${minutes}.`
+  );
+}
+
+function fmtDate(data) {
+  return cap(
+    `${where(data)}сегодня ${data.date}.`
+  );
+}
+
+function fmtRate(data) {
+  if (data.usd) {
+    return (
+      `${data.currency} стоит около ${Math.round(data.usd)} долларов, ` +
+      `это примерно ${Math.round(data.rub)} рублей.`
+    );
+  }
+
+  return (
+    `Курс ${data.currency} — ${data.rub} рублей ` +
+    `по данным ЦБ на ${data.date}.`
+  );
 }
 
 const FAST_FMT = {
@@ -397,18 +561,31 @@ const FAST_FMT = {
 };
 
 // ---------- ПРЕ-РОУТЕР: ответ вообще без вызова модели ----------
-const REPEAT_RE = /(повтор|ещ раз|что ты сказа|не расслыш|не понял что ты)/;
+const REPEAT_RE =
+  /(повтор|ещ раз|что ты сказа|не расслыш|не понял что ты)/;
 
-const TIME_RE = /(скольк( сейчас)? времен|котор( сейчас)? час|скольк на час|как сейчас времен|точн время)/;
-const DATE_RE = /(как сегодн числ|как сегодн ден|как ден недел|как( сегодн)? дат|как числ сегодн)/;
-const TIME_BLOCK_RE = /(нужн|надо|займ|потреб|уйдет|остал|прошл|чтоб|через|назад|заня)/;
+const TIME_RE =
+  /(скольк( сейчас)? времен|котор( сейчас)? час|скольк на час|как сейчас времен|точн время)/;
 
-const WEATHER_RE = /(погод|скольк градус|как температур|тепл л|холодн л|дожд|зонт|снег|пасмурн|солнечн)/;
-const WEATHER_BLOCK_RE = /(почем|объясн|сравн|послезавтр|вчер|недел|выходн|через|был|мес|прогноз на)/;
+const DATE_RE =
+  /(как сегодн числ|как сегодн ден|как ден недел|как( сегодн)? дат|как числ сегодн)/;
+
+const TIME_BLOCK_RE =
+  /(нужн|надо|займ|потреб|уйдет|остал|прошл|чтоб|через|назад|заня)/;
+
+const WEATHER_RE =
+  /(погод|скольк градус|как температур|тепл л|холодн л|дожд|зонт|снег|пасмурн|солнечн)/;
+
+const WEATHER_BLOCK_RE =
+  /(почем|объясн|сравн|послезавтр|вчер|недел|выходн|через|был|мес|прогноз на)/;
+
 const TOMORROW_RE = /(^| )завтр/;
 
-const RATE_RE = /(курс|скольк сто|почем доллар|почем евр|почем биткоин)/;
-const RATE_BLOCK_RE = /(вчер|был|будет|прогноз|почем упа|почем рос|через|прошл|динамик)/;
+const RATE_RE =
+  /(курс|скольк сто|почем доллар|почем евр|почем биткоин)/;
+
+const RATE_BLOCK_RE =
+  /(вчер|был|будет|прогноз|почем упа|почем рос|через|прошл|динамик)/;
 
 const CURRENCY_MAP = [
   [/доллар|бакс|usd/, 'USD'],
@@ -428,84 +605,182 @@ const CURRENCY_MAP = [
 ];
 
 function currencyFrom(stemmed) {
-  for (const [re, c] of CURRENCY_MAP) {
-    if (re.test(stemmed)) return c;
+  for (const [regex, currency] of CURRENCY_MAP) {
+    if (regex.test(stemmed)) return currency;
   }
+
   return null;
 }
 
 async function preRoute(rawText, nluTokens, ctx) {
   const plain = norm(rawText);
-  if (!plain || plain.length > 80) return null;
 
-  const tokens = (nluTokens && nluTokens.length ? nluTokens.map(norm) : plain.split(' ')).filter(Boolean);
+  if (!plain || plain.length > 80) {
+    return null;
+  }
+
+  const tokens = (
+    nluTokens && nluTokens.length
+      ? nluTokens.map(norm)
+      : plain.split(' ')
+  ).filter(Boolean);
+
   const stemmed = tokens.map(stem).join(' ');
   const cityHere = cityFromTokens(tokens);
 
   // «повтори»
   if (REPEAT_RE.test(stemmed) && ctx.last) {
     console.log('PRE: repeat');
-    return { answer: ctx.last, intent: ctx.intent, city: ctx.city };
+
+    return {
+      answer: ctx.last,
+      intent: ctx.intent,
+      city: ctx.city
+    };
   }
 
   // время
-  if (TIME_RE.test(stemmed) && !TIME_BLOCK_RE.test(stemmed)) {
+  if (
+    TIME_RE.test(stemmed) &&
+    !TIME_BLOCK_RE.test(stemmed)
+  ) {
     const loc = cityHere || HOME;
+
     console.log('PRE: time', loc.n);
-    return { answer: fmtTime(timeByLoc(loc)), intent: 'time', city: loc.n };
+
+    return {
+      answer: fmtTime(timeByLoc(loc)),
+      intent: 'time',
+      city: loc.n
+    };
   }
 
   // дата и день недели
-  if (DATE_RE.test(stemmed) && !TIME_BLOCK_RE.test(stemmed)) {
+  if (
+    DATE_RE.test(stemmed) &&
+    !TIME_BLOCK_RE.test(stemmed)
+  ) {
     const loc = cityHere || HOME;
+
     console.log('PRE: date', loc.n);
-    return { answer: fmtDate(timeByLoc(loc)), intent: 'date', city: loc.n };
+
+    return {
+      answer: fmtDate(timeByLoc(loc)),
+      intent: 'date',
+      city: loc.n
+    };
   }
 
   // погода: сегодня и завтра
-  if (WEATHER_RE.test(stemmed) && !WEATHER_BLOCK_RE.test(stemmed)) {
-    const loc = cityHere || (ctx.city ? CITY_INDEX[stemPhrase(ctx.city)] : null) || HOME;
-    const d = await weatherByLoc(loc);
-    if (!d.error) {
-      const tomorrow = TOMORROW_RE.test(stemmed);
-      console.log('PRE: weather', loc.n, tomorrow ? 'завтра' : 'сегодня');
+  if (
+    WEATHER_RE.test(stemmed) &&
+    !WEATHER_BLOCK_RE.test(stemmed)
+  ) {
+    const previousCity =
+      ctx.city
+        ? CITY_INDEX[stemPhrase(ctx.city)]
+        : null;
+
+    const loc =
+      cityHere ||
+      previousCity ||
+      HOME;
+
+    const data = await weatherByLoc(loc);
+
+    if (!data.error) {
+      const tomorrow =
+        TOMORROW_RE.test(stemmed);
+
+      console.log(
+        'PRE: weather',
+        loc.n,
+        tomorrow ? 'завтра' : 'сегодня'
+      );
+
       return {
-        answer: tomorrow ? fmtWeatherTomorrow(d) : fmtWeather(d),
-        intent: tomorrow ? 'weather_tomorrow' : 'weather',
+        answer:
+          tomorrow
+            ? fmtWeatherTomorrow(data)
+            : fmtWeather(data),
+        intent:
+          tomorrow
+            ? 'weather_tomorrow'
+            : 'weather',
         city: loc.n
       };
     }
   }
 
   // курсы
-  if (RATE_RE.test(stemmed) && !RATE_BLOCK_RE.test(stemmed)) {
+  if (
+    RATE_RE.test(stemmed) &&
+    !RATE_BLOCK_RE.test(stemmed)
+  ) {
     const code = currencyFrom(stemmed);
+
     if (code) {
-      const d = await getRate({ code });
-      if (!d.error) {
+      const data = await getRate({ code });
+
+      if (!data.error) {
         console.log('PRE: rate', code);
-        return { answer: fmtRate(d), intent: 'rate', city: ctx.city };
+
+        return {
+          answer: fmtRate(data),
+          intent: 'rate',
+          city: ctx.city
+        };
       }
     }
   }
 
-  // короткое уточнение: «а в москве?» — повторяем прошлый интент для нового города
-  if (cityHere && tokens.length <= 3 && ctx.intent) {
-    if (ctx.intent === 'time' || ctx.intent === 'date') {
-      console.log('PRE: follow-up', ctx.intent, cityHere.n);
-      const t = timeByLoc(cityHere);
+  // «А в Москве?» после прошлого вопроса
+  if (
+    cityHere &&
+    tokens.length <= 3 &&
+    ctx.intent
+  ) {
+    if (
+      ctx.intent === 'time' ||
+      ctx.intent === 'date'
+    ) {
+      console.log(
+        'PRE: follow-up',
+        ctx.intent,
+        cityHere.n
+      );
+
+      const time = timeByLoc(cityHere);
+
       return {
-        answer: ctx.intent === 'time' ? fmtTime(t) : fmtDate(t),
+        answer:
+          ctx.intent === 'time'
+            ? fmtTime(time)
+            : fmtDate(time),
         intent: ctx.intent,
         city: cityHere.n
       };
     }
-    if (ctx.intent === 'weather' || ctx.intent === 'weather_tomorrow') {
-      const d = await weatherByLoc(cityHere);
-      if (!d.error) {
-        console.log('PRE: follow-up', ctx.intent, cityHere.n);
+
+    if (
+      ctx.intent === 'weather' ||
+      ctx.intent === 'weather_tomorrow'
+    ) {
+      const data =
+        await weatherByLoc(cityHere);
+
+      if (!data.error) {
+        console.log(
+          'PRE: follow-up',
+          ctx.intent,
+          cityHere.n
+        );
+
         return {
-          answer: ctx.intent === 'weather_tomorrow' ? fmtWeatherTomorrow(d) : fmtWeather(d),
+          answer:
+            ctx.intent === 'weather_tomorrow'
+              ? fmtWeatherTomorrow(data)
+              : fmtWeather(data),
           intent: ctx.intent,
           city: cityHere.n
         };
@@ -517,160 +792,429 @@ async function preRoute(rawText, nluTokens, ctx) {
 }
 
 // ---------- модель ----------
-const HARD_RE = /посчитай|сколько будет|сколько .{0,20}(можно|получится|выйдет)|почему|объясни|сравни|стоит ли|что выгоднее|в чём разница|в чем разница|как работает|придумай|расскажи про|что думаешь|как считаешь|убеди/i;
+const HARD_RE =
+  /посчитай|сколько будет|сколько .{0,20}(можно|получится|выйдет)|почему|объясни|сравни|стоит ли|что выгоднее|в чём разница|в чем разница|как работает|придумай|расскажи про|что думаешь|как считаешь|убеди/i;
 
 function pickMode(text) {
-  const hard = HARD_RE.test(text) || text.length > 70;
+  const hard =
+    HARD_RE.test(text) ||
+    text.length > 70;
+
   return hard
-    ? { model: MODEL_SMART, tokens: 400 }
-    : { model: MODEL_FAST, tokens: 300 };
+    ? {
+        model: MODEL_SMART,
+        tokens: 400
+      }
+    : {
+        model: MODEL_FAST,
+        tokens: 300
+      };
 }
 
 const SYSTEM_PROMPT =
   'Ты голосовой ассистент в умной колонке. Тебя слушают, а не читают. ' +
   'Говори живо и по-человечески, 1-3 предложения. Начинай сразу с сути: никаких "Конечно", "Отличный вопрос", "Давайте разберёмся". ' +
   'Можно лёгкая ирония и своё мнение. Без списков, markdown, эмодзи и скобок — в речи это звучит мусором. Без мата и 18+ тем. ' +
-  'ВАЖНО: никогда не называй цифры (курсы, цены, статистику) по памяти — только из результатов инструментов. ' +
+  'ВАЖНО: никогда не называй цифры, курсы, цены или статистику по памяти — только из результатов инструментов. ' +
   'Для курсов валют и криптовалют вызывай get_rate. Для новостей, цен, событий и свежих фактов вызывай web_search. ' +
-  'Названия технологий пиши так, как их произносят разработчики: Flask — флэск, Django — джанго, SQL — эс-ку-эль, FastAPI — фаст эй пи ай. Не переводи названия на русский. ' +
+  'Для погоды вызывай get_weather, если запрос не был обработан локально. Для времени и даты вызывай get_time. ' +
+  'Названия технологий пиши так, как их произносят разработчики: Flask — флэск, Django — джанго, SQL — эс-ку-эль, FastAPI — фаст эй пи ай. Не переводи названия технологий на русский. ' +
   'При вычислениях с дробями посчитай по шагам про себя и проверь порядок величины обратным умножением, вслух скажи только результат. ' +
   'Если инструмент вернул ошибку — честно скажи, что не смог узнать, но не выдумывай данные.';
 
 const TOOLS = [
   {
-    functionDeclarations: [
-      {
-        name: 'get_weather',
-        description: 'Актуальная погода в городе.',
-        parameters: {
-          type: 'OBJECT',
-          properties: {
-            city: {
-              type: 'STRING',
-              description: 'Город в именительном падеже, например "Москва". Всегда приводи к именительному падежу.'
-            }
-          },
-          required: ['city']
-        }
-      },
-      {
-        name: 'get_time',
-        description: 'Текущее время и дата в городе.',
-        parameters: {
-          type: 'OBJECT',
-          properties: {
-            city: {
-              type: 'STRING',
-              description: 'Город в именительном падеже. Если не указан — "Санкт-Петербург".'
-            }
-          },
-          required: ['city']
-        }
-      },
-      {
-        name: 'get_rate',
-        description: 'Точный курс валюты или криптовалюты. Используй ВСЕГДА для вопросов про доллар, евро, биткоин и любые курсы.',
-        parameters: {
-          type: 'OBJECT',
-          properties: {
-            code: {
-              type: 'STRING',
-              description: 'Код валюты: USD, EUR, CNY, BTC, ETH и т.д.'
-            }
-          },
-          required: ['code']
-        }
-      },
-      {
-        name: 'web_search',
-        description: 'Поиск в интернете: новости, события, цены товаров, факты о компаниях, спорт, всё что могло измениться.',
-        parameters: {
-          type: 'OBJECT',
-          properties: {
-            query: {
-              type: 'STRING',
-              description: 'Конкретный поисковый запрос. Формулируй точно, не общими словами.'
-            }
-          },
-          required: ['query']
-        }
+    type: 'function',
+    function: {
+      name: 'get_weather',
+      description:
+        'Получает актуальную погоду в указанном городе.',
+      parameters: {
+        type: 'object',
+        properties: {
+          city: {
+            type: 'string',
+            description:
+              'Город в именительном падеже, например Москва. Всегда приводи название города к именительному падежу.'
+          }
+        },
+        required: ['city'],
+        additionalProperties: false
       }
-    ]
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'get_time',
+      description:
+        'Получает текущее местное время и дату в указанном городе.',
+      parameters: {
+        type: 'object',
+        properties: {
+          city: {
+            type: 'string',
+            description:
+              'Город в именительном падеже. Если пользователь не указал город, передай Санкт-Петербург.'
+          }
+        },
+        required: ['city'],
+        additionalProperties: false
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'get_rate',
+      description:
+        'Получает точный актуальный курс валюты или криптовалюты. Используй всегда для вопросов про доллар, евро, биткоин и любые курсы.',
+      parameters: {
+        type: 'object',
+        properties: {
+          code: {
+            type: 'string',
+            description:
+              'Международный код валюты или криптовалюты: USD, EUR, CNY, BTC, ETH и так далее.'
+          }
+        },
+        required: ['code'],
+        additionalProperties: false
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'web_search',
+      description:
+        'Ищет актуальную информацию в интернете: новости, события, цены товаров, спорт и факты, которые могли измениться.',
+      parameters: {
+        type: 'object',
+        properties: {
+          query: {
+            type: 'string',
+            description:
+              'Точный конкретный поисковый запрос на русском языке.'
+          }
+        },
+        required: ['query'],
+        additionalProperties: false
+      }
+    }
   }
 ];
 
-async function callGemini(contents, mode) {
-  const res = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${mode.model}:generateContent?key=${GEMINI_KEY}`,
+function safeJsonParse(value) {
+  if (!value) return {};
+
+  if (typeof value === 'object') {
+    return value;
+  }
+
+  try {
+    return JSON.parse(value);
+  } catch (e) {
+    console.error(
+      'TOOL ARGS JSON ERROR:',
+      String(value).slice(0, 200)
+    );
+
+    return {};
+  }
+}
+
+function compactHistory(
+  messages,
+  maxMessages = 18
+) {
+  if (messages.length <= maxMessages) {
+    return messages;
+  }
+
+  const trimmed =
+    messages.slice(-maxMessages);
+
+  while (
+    trimmed.length &&
+    trimmed[0].role !== 'user'
+  ) {
+    trimmed.shift();
+  }
+
+  return trimmed;
+}
+
+async function callAITunnel(
+  messages,
+  mode
+) {
+  if (!AITUNNEL_KEY) {
+    throw new Error(
+      'Не задан AITUNNEL_KEY'
+    );
+  }
+
+  const started = Date.now();
+
+  const response = await fetch(
+    AITUNNEL_URL,
     {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type':
+          'application/json',
+        Authorization:
+          `Bearer ${AITUNNEL_KEY}`
+      },
       body: JSON.stringify({
-        contents,
+        model: mode.model,
+        messages: [
+          {
+            role: 'system',
+            content: SYSTEM_PROMPT
+          },
+          ...messages
+        ],
         tools: TOOLS,
-        systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
-        generationConfig: { maxOutputTokens: mode.tokens, temperature: 0.9 }
+        tool_choice: 'auto',
+        max_tokens: mode.tokens,
+        temperature: 0.7
       })
     }
   );
-  const data = await res.json();
-  console.log('GEMINI:', mode.model, JSON.stringify(data).slice(0, 400));
 
-  if (data.error) throw new Error('API error: ' + JSON.stringify(data.error).slice(0, 200));
-  if (!data.candidates || !data.candidates.length) {
-    throw new Error('Нет candidates');
-  }
-  return data.candidates[0].content;
-}
+  const raw = await response.text();
 
-function textFrom(content) {
-  return (content.parts || []).map((p) => p.text || '').join(' ').trim();
-}
+  let data;
 
-async function askAI(contents, mode) {
-  let history = [...contents];
-
-  for (let round = 0; round < 2; round++) {
-    const content = await callGemini(history, mode);
-    history.push(content);
-
-    const calls = (content.parts || []).filter((p) => p.functionCall);
-    if (!calls.length) return { answer: textFrom(content), history };
-
-    const responses = await Promise.all(
-      calls.map(async (p) => {
-        const { name, args } = p.functionCall;
-        const fn = TOOL_IMPL[name];
-        console.log('TOOL:', name, JSON.stringify(args));
-        let result;
-        try {
-          result = fn ? await fn(args || {}) : { error: 'Неизвестный инструмент' };
-        } catch (e) {
-          console.error('TOOL ERROR:', e.message);
-          result = { error: 'Ошибка выполнения' };
-        }
-        return { name, result, functionResponse: { name, response: result } };
-      })
+  try {
+    data = JSON.parse(raw);
+  } catch (e) {
+    throw new Error(
+      'AITUNNEL вернул не JSON: ' +
+      raw.slice(0, 200)
     );
+  }
 
-    if (round === 0 && responses.length === 1) {
-      const r = responses[0];
-      const fmt = FAST_FMT[r.name];
-      if (fmt && !r.result.error) {
-        console.log('FAST PATH:', r.name);
-        history.push({ role: 'user', parts: [{ functionResponse: r.functionResponse }] });
-        return { answer: fmt(r.result), history };
-      }
+  console.log(
+    'AITUNNEL:',
+    mode.model,
+    response.status,
+    `${Date.now() - started}ms`,
+    JSON.stringify(data).slice(0, 400)
+  );
+
+  if (!response.ok || data.error) {
+    throw new Error(
+      'AITUNNEL API error: ' +
+      JSON.stringify(
+        data.error || data
+      ).slice(0, 250)
+    );
+  }
+
+  const message =
+    data.choices &&
+    data.choices[0] &&
+    data.choices[0].message;
+
+  if (!message) {
+    throw new Error(
+      'AITUNNEL не вернул choices[0].message'
+    );
+  }
+
+  return message;
+}
+
+function textFrom(message) {
+  if (!message) return '';
+
+  if (
+    typeof message.content === 'string'
+  ) {
+    return message.content.trim();
+  }
+
+  if (
+    Array.isArray(message.content)
+  ) {
+    return message.content
+      .map((part) => {
+        if (
+          part &&
+          typeof part.text === 'string'
+        ) {
+          return part.text;
+        }
+
+        return '';
+      })
+      .join(' ')
+      .trim();
+  }
+
+  return '';
+}
+
+async function askAI(messages, mode) {
+  let history =
+    compactHistory([...messages]);
+
+  for (
+    let round = 0;
+    round < 2;
+    round++
+  ) {
+    const message =
+      await callAITunnel(
+        history,
+        mode
+      );
+
+    const calls =
+      Array.isArray(message.tool_calls)
+        ? message.tool_calls
+        : [];
+
+    if (!calls.length) {
+      const answer =
+        textFrom(message);
+
+      history.push({
+        role: 'assistant',
+        content: answer
+      });
+
+      return {
+        answer,
+        history:
+          compactHistory(history)
+      };
     }
 
     history.push({
-      role: 'user',
-      parts: responses.map((r) => ({ functionResponse: r.functionResponse }))
+      role: 'assistant',
+      content:
+        textFrom(message) || null,
+      tool_calls: calls
     });
+
+    const responses =
+      await Promise.all(
+        calls.map(async (call) => {
+          const name =
+            call.function &&
+            call.function.name;
+
+          const args =
+            safeJsonParse(
+              call.function &&
+              call.function.arguments
+            );
+
+          const fn =
+            TOOL_IMPL[name];
+
+          console.log(
+            'TOOL:',
+            name,
+            JSON.stringify(args)
+          );
+
+          let result;
+
+          try {
+            result = fn
+              ? await fn(args)
+              : {
+                  error:
+                    'Неизвестный инструмент'
+                };
+          } catch (e) {
+            console.error(
+              'TOOL ERROR:',
+              e.message
+            );
+
+            result = {
+              error:
+                'Ошибка выполнения'
+            };
+          }
+
+          return {
+            call,
+            name,
+            result
+          };
+        })
+      );
+
+    for (const item of responses) {
+      history.push({
+        role: 'tool',
+        tool_call_id: item.call.id,
+        content:
+          JSON.stringify(item.result)
+      });
+    }
+
+    if (
+      round === 0 &&
+      responses.length === 1
+    ) {
+      const result = responses[0];
+      const formatter =
+        FAST_FMT[result.name];
+
+      if (
+        formatter &&
+        !result.result.error
+      ) {
+        const answer =
+          formatter(result.result);
+
+        console.log(
+          'FAST PATH:',
+          result.name
+        );
+
+        history.push({
+          role: 'assistant',
+          content: answer
+        });
+
+        return {
+          answer,
+          history:
+            compactHistory(history)
+        };
+      }
+    }
   }
 
-  const final = await callGemini(history, mode);
-  return { answer: textFrom(final) || 'Не смог разобраться.', history };
+  const finalMessage =
+    await callAITunnel(
+      history,
+      mode
+    );
+
+  const answer =
+    textFrom(finalMessage) ||
+    'Не смог разобраться.';
+
+  history.push({
+    role: 'assistant',
+    content: answer
+  });
+
+  return {
+    answer,
+    history:
+      compactHistory(history)
+  };
 }
 
 // ---------- прогрев кэшей пингером ----------
@@ -678,93 +1222,229 @@ async function warmup() {
   try {
     await Promise.all([
       weatherByLoc(HOME),
-      weatherByLoc(CITY_INDEX[stemPhrase('Москва')]),
-      getRate({ code: 'USD' })
+      weatherByLoc(
+        CITY_INDEX[
+          stemPhrase('Москва')
+        ]
+      ),
+      getRate({
+        code: 'USD'
+      })
     ]);
+
     console.log('WARMUP done');
   } catch (e) {
-    console.error('WARMUP ERROR:', e.message);
+    console.error(
+      'WARMUP ERROR:',
+      e.message
+    );
   }
 }
 
-module.exports = async function handler(req, res) {
-  if (req.method === 'GET') {
-    warmup();
-    return res.status(200).send('ok');
-  }
-  if (req.method !== 'POST') return res.status(405).send('Method not allowed');
+module.exports =
+  async function handler(req, res) {
+    if (req.method === 'GET') {
+      await warmup();
 
-  const body = req.body;
-  const sessionId = body.session.session_id;
-  const userText = body.request.command || '';
-  const nluTokens = (body.request.nlu && body.request.nlu.tokens) || [];
-  const isNew = body.session.new;
-
-  if (isNew || !sessions[sessionId]) sessions[sessionId] = [];
-  if (isNew || !ctxStore[sessionId]) ctxStore[sessionId] = {};
-
-  if (isNew) {
-    const hello = GREETINGS[Math.floor(Math.random() * GREETINGS.length)];
-    return res.status(200).json(respond(hello, body));
-  }
-
-  if (sessions[sessionId].length > 10) {
-    sessions[sessionId] = sessions[sessionId].slice(-10);
-  }
-
-  sessions[sessionId].push({ role: 'user', parts: [{ text: userText }] });
-
-  const ctx = ctxStore[sessionId];
-
-  // пре-роутер: если попали в шаблон — модель не трогаем вообще
-  try {
-    const quick = await preRoute(userText, nluTokens, ctx);
-    if (quick) {
-      ctx.intent = quick.intent;
-      ctx.city = quick.city;
-      ctx.last = quick.answer;
-      sessions[sessionId].push({ role: 'model', parts: [{ text: quick.answer }] });
-      return res.status(200).json(respond(quick.answer, body));
+      return res
+        .status(200)
+        .send('ok');
     }
-  } catch (e) {
-    console.error('PRE ERROR:', e.message);
-  }
 
-  const mode = pickMode(userText);
-  console.log('MODE:', mode.model, mode.tokens, '|', userText.slice(0, 60));
-
-  let answer;
-  try {
-    const result = await Promise.race([
-      askAI(sessions[sessionId], mode),
-      new Promise((resolve) => setTimeout(() => resolve(null), ANSWER_TIMEOUT))
-    ]);
-
-    if (result) {
-      answer = result.answer || 'Не понял вопрос, попробуй ещё раз.';
-      sessions[sessionId] = result.history;
-    } else {
-      console.error('TIMEOUT после', ANSWER_TIMEOUT, 'мс');
-      answer = 'Что-то я задумался. Спроси ещё раз.';
+    if (req.method !== 'POST') {
+      return res
+        .status(405)
+        .send('Method not allowed');
     }
-  } catch (e) {
-    console.error('AI ERROR:', e.message);
-    answer = 'Извини, что-то пошло не так, попробуй ещё раз.';
-  }
 
-  if (answer.length > 1000) answer = answer.slice(0, 1000);
+    const body = req.body || {};
+    const session = body.session || {};
+    const request = body.request || {};
 
-  ctx.intent = null;
-  ctx.city = null;
-  ctx.last = answer;
+    const sessionId =
+      session.session_id ||
+      'unknown-session';
 
-  return res.status(200).json(respond(answer, body));
-};
+    const userText =
+      request.command || '';
+
+    const nluTokens =
+      request.nlu &&
+      request.nlu.tokens
+        ? request.nlu.tokens
+        : [];
+
+    const isNew =
+      Boolean(session.new);
+
+    if (
+      isNew ||
+      !sessions[sessionId]
+    ) {
+      sessions[sessionId] = [];
+    }
+
+    if (
+      isNew ||
+      !ctxStore[sessionId]
+    ) {
+      ctxStore[sessionId] = {};
+    }
+
+    if (isNew) {
+      const hello =
+        GREETINGS[
+          Math.floor(
+            Math.random() *
+            GREETINGS.length
+          )
+        ];
+
+      return res
+        .status(200)
+        .json(
+          respond(hello, body)
+        );
+    }
+
+    sessions[sessionId] =
+      compactHistory(
+        sessions[sessionId],
+        18
+      );
+
+    sessions[sessionId].push({
+      role: 'user',
+      content: userText
+    });
+
+    const ctx =
+      ctxStore[sessionId];
+
+    // пре-роутер
+    try {
+      const quick =
+        await preRoute(
+          userText,
+          nluTokens,
+          ctx
+        );
+
+      if (quick) {
+        ctx.intent = quick.intent;
+        ctx.city = quick.city;
+        ctx.last = quick.answer;
+
+        sessions[sessionId].push({
+          role: 'assistant',
+          content: quick.answer
+        });
+
+        return res
+          .status(200)
+          .json(
+            respond(
+              quick.answer,
+              body
+            )
+          );
+      }
+    } catch (e) {
+      console.error(
+        'PRE ERROR:',
+        e.message
+      );
+    }
+
+    const mode =
+      pickMode(userText);
+
+    console.log(
+      'MODE:',
+      mode.model,
+      mode.tokens,
+      '|',
+      userText.slice(0, 60)
+    );
+
+    let answer;
+
+    try {
+      const result =
+        await Promise.race([
+          askAI(
+            sessions[sessionId],
+            mode
+          ),
+          new Promise((resolve) => {
+            setTimeout(
+              () => resolve(null),
+              ANSWER_TIMEOUT
+            );
+          })
+        ]);
+
+      if (result) {
+        answer =
+          result.answer ||
+          'Не понял вопрос, попробуй ещё раз.';
+
+        sessions[sessionId] =
+          result.history;
+      } else {
+        console.error(
+          'TIMEOUT после',
+          ANSWER_TIMEOUT,
+          'мс'
+        );
+
+        answer =
+          'Что-то я задумался. Спроси ещё раз.';
+      }
+    } catch (e) {
+      console.error(
+        'AI ERROR:',
+        e.message
+      );
+
+      answer =
+        'Извини, что-то пошло не так, попробуй ещё раз.';
+    }
+
+    if (answer.length > 1000) {
+      answer =
+        answer.slice(0, 1000);
+    }
+
+    ctx.intent = null;
+    ctx.city = null;
+    ctx.last = answer;
+
+    return res
+      .status(200)
+      .json(
+        respond(answer, body)
+      );
+  };
 
 function respond(text, body) {
-  const tts = text.replace(/\. /g, '. sil <[300]> ');
+  const safeText =
+    String(text || '')
+      .trim() ||
+    'Не смог ответить.';
+
+  const tts =
+    safeText.replace(
+      /\. /g,
+      '. sil <[300]> '
+    );
+
   return {
-    response: { text, tts, end_session: false },
+    response: {
+      text: safeText,
+      tts,
+      end_session: false
+    },
     session: body.session,
     version: body.version
   };
