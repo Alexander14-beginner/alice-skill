@@ -4,7 +4,7 @@ const GEMINI_KEY = process.env.GEMINI_KEY;
 const TAVILY_KEY = process.env.TAVILY_KEY;
 
 const MODEL_FAST = 'gemini-3.5-flash-lite';
-const MODEL_SMART = 'gemini-3.5-flash';
+const MODEL_SMART = 'gemini-3.6-flash';
 
 const CITY_ALIASES = {
   'мск': 'Москва', 'москва': 'Москва',
